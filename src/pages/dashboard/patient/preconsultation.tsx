@@ -9,8 +9,6 @@ export default function PreConsultationPage(){
   const [emergencyResult, setEmergencyResult] = useState<any>(null)
   const [hospitals, setHospitals] = useState<any[] | null>(null)
   const [locationDenied, setLocationDenied] = useState(false)
-
-  // New state for hospital selection for standard consultations
   const [showHospitalPickerForStandard, setShowHospitalPickerForStandard] = useState(false)
   const [selectedHospitalId, setSelectedHospitalId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
