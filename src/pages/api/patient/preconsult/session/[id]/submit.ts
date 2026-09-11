@@ -17,10 +17,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!userId) return res.status(401).json({ error: 'Unauthorized' })
   if (!id || typeof id !== 'string') return res.status(400).json({ error: 'Invalid session id' })
 
+  const { hospitalId } = req.body || {}
+  if (!hospitalId || typeof hospitalId !== 'string') return res.status(400).json({ error: 'hospitalId is required' })
+
   try {
     const consultation = await prisma.$transaction(async (tx) => {
       const patient = await tx.patient.findUnique({ where: { userId } })
       if (!patient) throw new Error('PATIENT_NOT_FOUND')
+
+      const hospital = await tx.hospital.findUnique({ where: { id: hospitalId } })
+      if (!hospital) throw new Error('HOSPITAL_NOT_FOUND')
 
       const preConsultation = await tx.preConsultationSession.findUnique({
         where: { id },
@@ -32,7 +38,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (preConsultation.consultation) throw new Error('ALREADY_SUBMITTED')
 
       const created = await tx.consultation.create({
-        data: { patientId: patient.id, sessionId: preConsultation.id, status: 'REQUESTED' },
+        data: { patientId: patient.id, sessionId: preConsultation.id, status: 'REQUESTED', hospitalId: hospital.id },
       })
       await tx.accessAudit.create({
         data: {
@@ -52,7 +58,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(409).json({ error: 'ALREADY_SUBMITTED' })
     }
     const code = error instanceof Error ? error.message : 'SUBMISSION_FAILED'
-    if (code === 'PATIENT_NOT_FOUND' || code === 'SESSION_NOT_FOUND') return res.status(404).json({ error: code })
+    if (code === 'PATIENT_NOT_FOUND' || code === 'SESSION_NOT_FOUND' || code === 'HOSPITAL_NOT_FOUND') return res.status(404).json({ error: code })
     if (code === 'SESSION_NOT_COMPLETED' || code === 'REPORT_NOT_FOUND' || code === 'ALREADY_SUBMITTED') {
       return res.status(409).json({ error: code })
     }

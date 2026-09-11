@@ -58,6 +58,7 @@ export default async function handler(
     where: {
       userId,
     },
+    include: { hospitalLinks: true },
   })
 
   if (!doctor) {
@@ -87,6 +88,12 @@ export default async function handler(
   if (consultation.doctorId) {
     return res.status(409).json({
       error: 'Consultation is already assigned',
+    })
+  }
+
+  if (consultation.hospitalId && !doctor.hospitalLinks.some((l: any) => l.hospitalId === consultation.hospitalId)) {
+    return res.status(403).json({
+      error: 'Cannot assign a consultation from a hospital you are not linked to',
     })
   }
 
