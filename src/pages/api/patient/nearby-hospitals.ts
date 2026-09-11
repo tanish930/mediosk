@@ -1,7 +1,7 @@
 import { getSession } from 'next-auth/react'
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { z } from 'zod'
-import { findNearbyHospitals } from '../../../lib/maps'
+import { prisma } from '../../../lib/prisma'
 
 const BodySchema = z.object({ lat: z.number().optional(), lng: z.number().optional(), q: z.string().optional(), radius: z.number().optional() })
 
@@ -18,7 +18,27 @@ export default async function handler(req:NextApiRequest,res:NextApiResponse){
   if ((!lat || !lng) && !q) return res.status(400).json({ error: 'need_location_or_query' })
 
   try{
-    const results = await findNearbyHospitals(lat, lng, q, radius || 5000, 10)
+    // Search registered platform hospitals from the database so they have a valid Hospital.id
+    // to use for Consultation.hospitalId assignments.
+    const dbHospitals = await prisma.hospital.findMany({
+      where: q ? {
+        OR: [
+          { user: { name: { contains: q, mode: 'insensitive' } } },
+          { address: { contains: q, mode: 'insensitive' } }
+        ]
+      } : undefined,
+      include: { user: true },
+      take: 10
+    })
+
+    const results = dbHospitals.map(h => ({
+      id: h.id,
+      name: h.user?.name || 'Registered Hospital',
+      address: h.address || 'Address not provided',
+      // We don't have lat/lng stored for demo hospitals by default,
+      // but this ensures the ID is a valid foreign key.
+    }))
+
     return res.json({ hospitals: results })
   }catch(e:any){
     console.error('nearby-hospitals error', e)
