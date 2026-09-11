@@ -58,6 +58,7 @@ model Hospital {
   emergencyAlerts EmergencyAlert[]
   user            User             @relation(fields: [userId], references: [id])
   hospitalDoctors HospitalDoctor[]
+  consultations   Consultation[]
 }
 
 model DoctorCredential {
@@ -82,6 +83,7 @@ model Consent {
 model Consultation {
   id              String                  @id @default(uuid())
   doctorId        String?
+  hospitalId      String?
   patientId       String
   sessionId       String?                 @unique
   scheduledAt     DateTime?
@@ -90,6 +92,7 @@ model Consultation {
   updatedAt       DateTime                @updatedAt
   ayushAssessment AyushAssessment?
   doctor          Doctor?                 @relation(fields: [doctorId], references: [id])
+  hospital        Hospital?               @relation(fields: [hospitalId], references: [id])
   patient         Patient                 @relation(fields: [patientId], references: [id])
   session         PreConsultationSession? @relation(fields: [sessionId], references: [id])
   emergencyAlerts EmergencyAlert[]
