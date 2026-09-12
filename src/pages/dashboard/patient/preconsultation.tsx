@@ -146,25 +146,61 @@ export default function PreConsultationPage(){
     setSubmittedConsultation(body.consultation)
   }
 
-  async function openHospitalPicker(){
+    async function openHospitalPicker(){
     setHospitals(null)
     setLocationDenied(false)
+
+    const fetchFallbackHospitals = async () => {
+      try {
+        const r = await fetch('/api/patient/nearby-hospitals', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({})
+        })
+
+        const j = await r.json()
+        setHospitals(j.hospitals || [])
+      } catch (e) {
+        setHospitals([])
+      }
+    }
+
     if (typeof navigator !== 'undefined' && navigator.geolocation){
-      navigator.geolocation.getCurrentPosition(async (pos)=>{
-        const lat = pos.coords.latitude
-        const lng = pos.coords.longitude
-        try{
-          const r = await fetch('/api/patient/nearby-hospitals',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ lat, lng })})
-          const j = await r.json()
-          setHospitals(j.hospitals || [])
-        }catch(e){ setHospitals([]) }
-      }, (err)=>{ setLocationDenied(true); setHospitals([]) }, { enableHighAccuracy:false, timeout:10000 })
+      navigator.geolocation.getCurrentPosition(
+        async (pos)=>{
+          const lat = pos.coords.latitude
+          const lng = pos.coords.longitude
+
+          try{
+            const r = await fetch(
+              '/api/patient/nearby-hospitals',
+              {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ lat, lng })
+              }
+            )
+
+            const j = await r.json()
+            setHospitals(j.hospitals || [])
+          }catch(e){
+            setHospitals([])
+          }
+        },
+        (err)=>{
+          setLocationDenied(true)
+          fetchFallbackHospitals()
+        },
+        {
+          enableHighAccuracy: false,
+          timeout: 10000
+        }
+      )
     }else{
       setLocationDenied(true)
-      setHospitals([])
+      fetchFallbackHospitals()
     }
   }
-
   async function manualSearch(){
     if (!searchQuery) return
     setHospitals(null)
