@@ -1,4 +1,4 @@
-const { PrismaClient, Role } = require('@prisma/client')
+const { PrismaClient, Role, HospitalDoctorStatus } = require('@prisma/client')
 const bcrypt = require('bcryptjs')
 
 const prisma = new PrismaClient()
@@ -43,8 +43,12 @@ const demoAccounts = [
 ]
 
 async function main() {
+  const profiles = {}
+
+  // Create or update demo accounts and their profiles.
   for (const account of demoAccounts) {
     const hashedPassword = await bcrypt.hash(account.password, 12)
+
     const user = await prisma.user.upsert({
       where: { email: account.email },
       update: {
@@ -60,12 +64,50 @@ async function main() {
       }
     })
 
-    await account.profile(user.id)
+    const profile = await account.profile(user.id)
+
+    profiles[account.email] = profile
   }
+
+  const doctor = profiles['doctor@mediosk.demo']
+  const hospital = profiles['hospital@mediosk.demo']
+
+  // Link the demo doctor to the demo hospital.
+  const relationship = await prisma.hospitalDoctor.findFirst({
+    where: {
+      hospitalId: hospital.id,
+      doctorId: doctor.id
+    }
+  })
+
+  if (relationship) {
+    await prisma.hospitalDoctor.update({
+      where: {
+        id: relationship.id
+      },
+      data: {
+        status: HospitalDoctorStatus.ACTIVE
+      }
+    })
+
+    console.log('Demo Doctor is already linked; relationship set to ACTIVE.')
+  } else {
+    await prisma.hospitalDoctor.create({
+      data: {
+        hospitalId: hospital.id,
+        doctorId: doctor.id,
+        status: HospitalDoctorStatus.ACTIVE
+      }
+    })
+
+    console.log('Demo Doctor linked to Demo Hospital as ACTIVE.')
+  }
+
+  console.log('Demo accounts and hospital-doctor relationship seeded.')
 }
 
 main()
-  .then(() => console.log('Demo accounts seeded.'))
+  .then(() => console.log('Seed completed successfully.'))
   .catch((error) => {
     console.error(error)
     process.exitCode = 1
