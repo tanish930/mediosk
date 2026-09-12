@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma'
 import { runOCR } from '../lib/ocr'
-import { extractFromText } from '../lib/extract'
+import { extractMedicalData } from '../lib/llm'
 
 async function processOnce() {
   const job = await prisma.documentProcessing.findFirst({ where: { status: 'PENDING' }, orderBy: { createdAt: 'asc' } })
@@ -10,7 +10,7 @@ async function processOnce() {
     const doc = await prisma.medicalDocument.findUnique({ where: { id: job.documentId } })
     if (!doc) throw new Error('Document not found')
     const ocr = await runOCR(doc.url)
-    const extracted = extractFromText(ocr.text || '')
+    const extracted = await extractMedicalData(ocr.text || '')
     // store extraction
     await prisma.extractedMedicalData.create({ data: { documentId: doc.id, extracted } })
 

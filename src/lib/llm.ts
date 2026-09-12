@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { Extraction } from './extract'
+import { Extraction, ExtractionSchema, extractFromText } from './extract'
 
 export const DoctorSummarySchema = z.object({
   chronologicalHistory: z.string(),
@@ -16,7 +16,7 @@ export type DoctorSummary = z.infer<typeof DoctorSummarySchema>
 
 const PROVIDER = process.env.LLM_PROVIDER || 'openai'
 
-async function callOpenAISystem(messages: any[], timeoutMs = 30000, maxRetries = 2): Promise<string> {
+export async function callOpenAISystem(messages: any[], timeoutMs = 30000, maxRetries = 2): Promise<string> {
   const apiKey = process.env.LLM_API_KEY
   const model = process.env.LLM_MODEL || 'gpt-4o-mini'
   if (!apiKey) throw new Error('LLM API key not configured (LLM_API_KEY)')
@@ -64,6 +64,73 @@ function extractJSON(str: string) {
   if (first === -1 || last === -1 || last <= first) throw new Error('No JSON object found in model output')
   const sub = str.slice(first, last+1)
   return JSON.parse(sub)
+}
+
+/**
+ * Extracts structured medical data from OCR text using an LLM.
+ * Implements strict source-grounding to prevent invented diagnoses or medicines.
+ */
+export async function extractMedicalDataLLM(ocrText: string): Promise<Extraction> {
+  if (!ocrText || !ocrText.trim()) return {}
+
+  if (PROVIDER === 'mock') {
+    return {
+      diagnoses: ['Mock Diagnosis'],
+      medicines: [{ name: 'Mock Medicine', dosage: '10mg', frequency: 'daily' }],
+      investigations: [{ name: 'Mock Blood Test', value: '12', unit: 'g/dL', referenceRange: '11-15' }],
+      procedures: [{ name: 'Mock Surgery', date: '2026-09-12' }],
+      findings: ['Mock clinical findings'],
+      dates: ['2026-09-12']
+    }
+  }
+
+  // Sensible truncation to protect LLM request (approx 3000 tokens)
+  const MAX_OCR_TEXT_LENGTH = 12000
+  const truncatedText = ocrText.length > MAX_OCR_TEXT_LENGTH
+    ? ocrText.slice(0, MAX_OCR_TEXT_LENGTH) + '\n[OCR Text truncated...]'
+    : ocrText
+
+  const systemPrompt = `You are a strict clinical extraction assistant.
+Extract structured medical information from the provided OCR text into a JSON object matching the requested schema.
+
+CRITICAL INSTRUCTIONS FOR STRICT SOURCE-GROUNDING:
+1. You MUST extract ONLY information explicitly present in the OCR text.
+2. You MUST NOT invent, infer, extrapolate, or assume any diagnoses, medicines, dosages, lab values, procedures, clinical interpretations, or dates.
+3. If an item is not explicitly and clearly in the text, DO NOT include it.
+4. For example, if the OCR contains "BP 140/90", extract it as an investigation/vital measurement, but do NOT assume or invent the diagnosis "Hypertension" unless "Hypertension", "High blood pressure", or similar is explicitly mentioned.
+5. If a medicine name is partially unreadable, do not confidently invent the missing name. Extract as-is or omit if unreadable.
+6. If any field or array is empty or not found in the text, omit it or return an empty array.
+
+Return ONLY a JSON object:
+{
+  "diagnoses": ["string"],
+  "medicines": [{"name": "string", "dosage": "string", "frequency": "string"}],
+  "investigations": [{"name": "string", "value": "string", "unit": "string", "referenceRange": "string"}],
+  "procedures": [{"name": "string", "date": "string"}],
+  "findings": ["string"],
+  "dates": ["string"]
+}`
+
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: `OCR Text:\n\n${truncatedText}` }
+  ]
+
+  const responseText = await callOpenAISystem(messages)
+  const parsedJSON = extractJSON(responseText)
+  return ExtractionSchema.parse(parsedJSON)
+}
+
+/**
+ * Orchestrates medical extraction with LLM and falls back to regex-based extraction on failure.
+ */
+export async function extractMedicalData(text: string): Promise<Extraction> {
+  try {
+    return await extractMedicalDataLLM(text)
+  } catch (err: any) {
+    console.warn('LLM extraction failed, falling back to regex:', err?.message || err)
+    return extractFromText(text)
+  }
 }
 
 export async function generateSummaryPatientFriendly(extracted: Extraction, timeline: any[]): Promise<string> {
