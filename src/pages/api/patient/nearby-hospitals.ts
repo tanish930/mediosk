@@ -1,12 +1,13 @@
-import { getSession } from 'next-auth/react'
+import { getServerSession } from 'next-auth/next'
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { z } from 'zod'
 import { findNearbyHospitals } from '../../../lib/maps'
+import { authOptions } from '../auth/[...nextauth]'
 
 const BodySchema = z.object({ lat: z.number().optional(), lng: z.number().optional(), q: z.string().optional(), radius: z.number().optional() })
 
 export default async function handler(req:NextApiRequest,res:NextApiResponse){
-  const session = await getSession({ req })
+  const session = await getServerSession(req, res, authOptions)
   if (!session) return res.status(401).json({ error: 'unauthenticated' })
   const role = (session as any).user?.role
   if (role !== 'PATIENT') return res.status(403).json({ error: 'forbidden' })
