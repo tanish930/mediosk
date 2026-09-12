@@ -15,7 +15,6 @@ export default async function handler(req:NextApiRequest,res:NextApiResponse){
   const parsed = BodySchema.safeParse(req.body)
   if (!parsed.success) return res.status(400).json({ error: 'invalid' })
   const { lat, lng, q, radius } = parsed.data
-  if ((!lat || !lng) && !q) return res.status(400).json({ error: 'need_location_or_query' })
 
   try{
     // Search registered platform hospitals from the database so they have a valid Hospital.id

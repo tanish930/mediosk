@@ -149,6 +149,17 @@ export default function PreConsultationPage(){
   async function openHospitalPicker(){
     setHospitals(null)
     setLocationDenied(false)
+
+    const fetchFallbackHospitals = async () => {
+      try {
+        const r = await fetch('/api/patient/nearby-hospitals', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) })
+        const j = await r.json()
+        setHospitals(j.hospitals || [])
+      } catch (e) {
+        setHospitals([])
+      }
+    }
+
     if (typeof navigator !== 'undefined' && navigator.geolocation){
       navigator.geolocation.getCurrentPosition(async (pos)=>{
         const lat = pos.coords.latitude
@@ -158,10 +169,13 @@ export default function PreConsultationPage(){
           const j = await r.json()
           setHospitals(j.hospitals || [])
         }catch(e){ setHospitals([]) }
-      }, (err)=>{ setLocationDenied(true); setHospitals([]) }, { enableHighAccuracy:false, timeout:10000 })
+      }, (err)=>{
+        setLocationDenied(true);
+        fetchFallbackHospitals();
+      }, { enableHighAccuracy:false, timeout:10000 })
     }else{
       setLocationDenied(true)
-      setHospitals([])
+      fetchFallbackHospitals()
     }
   }
 
