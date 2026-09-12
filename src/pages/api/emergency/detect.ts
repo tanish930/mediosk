@@ -1,7 +1,8 @@
-import { getSession } from 'next-auth/react'
+import { getServerSession } from 'next-auth/next'
 import { NextApiRequest, NextApiResponse } from 'next'
 import { z } from 'zod'
 import { prisma } from '../../../lib/prisma'
+import { authOptions } from '../auth/[...nextauth]'
 
 const BodySchema = z.object({ sessionId: z.string(), createAlert: z.boolean().optional(), hospitalId: z.string().optional() })
 
@@ -26,7 +27,7 @@ function computeSeverityFromReport(report:any, complaint?:string){
 }
 
 export default async function handler(req:NextApiRequest,res:NextApiResponse){
-  const session = await getSession({ req })
+  const session = await getServerSession(req, res, authOptions)
   if (!session) return res.status(401).json({ error: 'unauthenticated' })
 
   const parsed = BodySchema.safeParse(req.body)
