@@ -9,6 +9,8 @@ export default function PreConsultationPage(){
   const [emergencyResult, setEmergencyResult] = useState<any>(null)
   const [hospitals, setHospitals] = useState<any[] | null>(null)
   const [locationDenied, setLocationDenied] = useState(false)
+  const [showHospitalPickerForStandard, setShowHospitalPickerForStandard] = useState(false)
+  const [selectedHospitalId, setSelectedHospitalId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -125,8 +127,16 @@ export default function PreConsultationPage(){
   }
 
   async function submitConsultation(){
+    if (!selectedHospitalId) {
+      alert('Please select a hospital to route your consultation request to.')
+      return
+    }
     setSubmitting(true)
-    const response = await fetch(`/api/patient/preconsult/session/${sessionId}/submit`, { method: 'POST' })
+    const response = await fetch(`/api/patient/preconsult/session/${sessionId}/submit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ hospitalId: selectedHospitalId })
+    })
     const body = await response.json().catch(()=>({}))
     setSubmitting(false)
     if (!response.ok) {
@@ -235,8 +245,40 @@ export default function PreConsultationPage(){
         <div className="max-w-md">
           <div className="mb-2">All questions answered.</div>
           {!sessionData.session.report && <button onClick={finish} className="px-3 py-2 bg-sky-600 text-white rounded">Finish and create Symptom Report</button>}
-          {sessionData.session.report && !submitted && <button disabled={submitting} onClick={submitConsultation} className="px-3 py-2 bg-sky-600 text-white rounded">{submitting ? 'Submitting...' : 'Submit Consultation Request'}</button>}
-          {submitted && <div className="mt-2 text-green-700">Consultation request submitted.</div>}
+          {sessionData.session.report && !submitted && !showHospitalPickerForStandard && <button onClick={() => { setShowHospitalPickerForStandard(true); openHospitalPicker(); }} className="px-3 py-2 bg-sky-600 text-white rounded">Select Hospital & Submit</button>}
+
+          {showHospitalPickerForStandard && !submitted && (
+            <div className="mt-4 p-4 border rounded bg-gray-50">
+              <h3 className="font-semibold mb-2">Select a hospital to route your consultation</h3>
+              {locationDenied && <div className="mt-2 text-sm text-amber-700">Location permission denied. Please search manually below.</div>}
+              {hospitals && (
+                <div className="mt-2">
+                  {hospitals.length === 0 && <div className="text-sm">No hospitals found.</div>}
+                  <div className="max-h-60 overflow-y-auto pr-2">
+                    {hospitals.map((h:any) => (
+                      <div key={h.id} className={`mb-2 p-2 border rounded cursor-pointer ${selectedHospitalId === h.id ? 'border-sky-600 bg-sky-50' : 'bg-white'}`} onClick={() => setSelectedHospitalId(h.id)}>
+                        <div className="font-medium">{h.name} {h.distanceMeters ? <span className="text-sm text-gray-500">({Math.round((h.distanceMeters||0)/1000*10)/10} km)</span> : null}</div>
+                        <div className="text-sm text-gray-600">{h.address}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {!hospitals && (
+                <div className="mt-3">
+                  <div className="text-sm mb-2">Or search manually:</div>
+                  <div className="flex space-x-2"><input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="City or hospital name" className="border p-2 rounded flex-1" /><button onClick={()=>manualSearch()} className="px-3 py-2 bg-gray-200 text-gray-800 rounded">Search</button></div>
+                </div>
+              )}
+
+              <div className="mt-4 flex space-x-2">
+                <button disabled={!selectedHospitalId || submitting} onClick={submitConsultation} className="px-3 py-2 bg-sky-600 text-white rounded disabled:opacity-50 flex-1">{submitting ? 'Submitting...' : 'Submit Consultation Request'}</button>
+                <button disabled={submitting} onClick={() => { setShowHospitalPickerForStandard(false); setSelectedHospitalId(null); }} className="px-3 py-2 border rounded">Cancel</button>
+              </div>
+            </div>
+          )}
+
+          {submitted && <div className="mt-2 p-3 bg-green-50 border border-green-200 text-green-700 rounded">Consultation request submitted successfully.</div>}
           {emergencyResult && (
             <div className="mt-4 p-3 border rounded bg-yellow-50">
               <div className="font-semibold">Emergency check: {emergencyResult.severity}</div>
