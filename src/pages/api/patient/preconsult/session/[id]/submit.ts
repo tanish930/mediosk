@@ -1,7 +1,9 @@
-import { getSession } from 'next-auth/react'
+import { getServerSession } from 'next-auth/next'
+import { authOptions } from '../../../../auth/[...nextauth]'
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../../../../../../lib/prisma'
+
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -9,7 +11,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).end('Method Not Allowed')
   }
 
-  const session = await getSession({ req })
+ const session = await getServerSession(req, res, authOptions)
   if (!session) return res.status(401).json({ error: 'Unauthorized' })
   if ((session as any).user?.role !== 'PATIENT') return res.status(403).json({ error: 'Forbidden' })
   const userId = (session as any).user?.id
