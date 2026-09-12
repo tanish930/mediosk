@@ -11,12 +11,17 @@ export default async function handler(req:NextApiRequest,res:NextApiResponse){
   const hospital = await prisma.hospital.findUnique({ where: { userId: (session as any).user.id } })
   if (!hospital) return res.status(404).json({ error: 'Hospital not found' })
 
-  // Linked doctors' active consultations plus the hospital's unassigned intake pool.
+  // Fetch doctors linked to this hospital
+  const links = await prisma.hospitalDoctor.findMany({ where: { hospitalId: hospital.id } })
+  const doctorIds = links.map((l:any)=>l.doctorId)
+
+  // Linked doctors' active consultations plus the unassigned intake pool.
+  // A REQUESTED consultation has no doctor yet, so it cannot belong to a different hospital's doctor queue.
   const consultations = await prisma.consultation.findMany({
     where: {
       OR: [
-        { doctor: { hospitalLinks: { some: { hospitalId: hospital.id } } }, status: { in: ['PENDING', 'READY', 'IN_PROGRESS', 'SCHEDULED'] } },
-        { hospitalId: hospital.id, status: 'REQUESTED' },
+        { doctorId: { in: doctorIds }, status: { in: ['PENDING', 'READY', 'IN_PROGRESS', 'SCHEDULED'] } },
+        { doctorId: null, status: 'REQUESTED' },
       ],
     },
     include: { patient: { include: { user: true } }, session: { include: { report: true } } },

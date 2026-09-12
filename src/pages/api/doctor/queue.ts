@@ -23,14 +23,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const doctor = await prisma.doctor.findUnique({
     where: { userId },
-    include: { hospitalLinks: true },
   })
 
   if (!doctor) {
     return res.status(404).json({ error: 'Doctor profile not found' })
   }
-
-  const linkedHospitalIds = doctor.hospitalLinks.map((l: any) => l.hospitalId)
 
   const consultations = await prisma.consultation.findMany({
     where: {
@@ -42,7 +39,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         {
           doctorId: null,
           status: 'REQUESTED',
-          hospitalId: { in: linkedHospitalIds },
         },
       ],
     },
