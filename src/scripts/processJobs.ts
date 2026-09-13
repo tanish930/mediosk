@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma'
 import { runOCR } from '../lib/ocr'
 import { extractMedicalData } from '../lib/llm'
+import { assessAbnormalValue } from '../lib/abnormal'
 
 async function processOnce() {
   const job = await prisma.documentProcessing.findFirst({ where: { status: 'PENDING' }, orderBy: { createdAt: 'asc' } })
@@ -28,7 +29,21 @@ async function processOnce() {
     if (extracted.investigations) {
       for (const inv of extracted.investigations) {
         const title = `${inv.name}${inv.value? ': '+inv.value + (inv.unit? ' '+inv.unit : '') : ''}`
-        await prisma.medicalTimeline.create({ data: { patientId: doc.patientId, title, details: 'AI/OCR Generated — investigation', entryType: 'INVESTIGATION', date: new Date(), sourceDocumentId: doc.id } })
+        const abnormal = assessAbnormalValue(inv.value, inv.referenceRange)
+        const statusDetails = abnormal.status === 'UNKNOWN'
+          ? 'AI/OCR Generated — investigation'
+          : `AI/OCR Generated — investigation — ${abnormal.status}`
+
+        await prisma.medicalTimeline.create({
+          data: {
+            patientId: doc.patientId,
+            title,
+            details: statusDetails,
+            entryType: 'INVESTIGATION',
+            date: new Date(),
+            sourceDocumentId: doc.id
+          }
+        })
       }
     }
     if (extracted.medicines) {
