@@ -243,6 +243,7 @@ model SessionQuestion {
   id         String                 @id @default(uuid())
   sessionId  String
   templateId String?
+  key        String?
   text       String
   type       QuestionType
   options    Json?

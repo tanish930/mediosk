@@ -2,7 +2,7 @@ import { getToken } from 'next-auth/jwt'
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { prisma } from '../../../../lib/prisma'
 import { detectDomainFromComplaint } from '../../../../lib/domain'
-import { BANK } from '../../../../lib/questionBank'
+import { getNextAdaptiveQuestion } from '../../../../lib/adaptiveQuestioning'
 import { z } from 'zod'
 
 const BodySchema = z.object({ complaint: z.string().min(3) })
@@ -35,11 +35,18 @@ if (!userId) {
 
   const sessionRec = await prisma.preConsultationSession.create({ data: { patientId: patient.id, complaint, domain } })
 
-  // create session questions from bank
-  const qlist = BANK[domain] || BANK['general']
-  for (let i=0;i<qlist.length;i++){
-    const q = qlist[i]
-    await prisma.sessionQuestion.create({ data: { sessionId: sessionRec.id, text: q.text, type: q.type, order: i } })
+  // Initialize with the first adaptive question
+  const nextQ = getNextAdaptiveQuestion(domain, [], complaint)
+  if (nextQ) {
+    await prisma.sessionQuestion.create({ 
+      data: { 
+        sessionId: sessionRec.id, 
+        text: nextQ.text, 
+        type: nextQ.type, 
+        key: nextQ.key, // Pass the key
+        order: 0 
+      } 
+    })
   }
 
   return res.json({ sessionId: sessionRec.id, domain })
