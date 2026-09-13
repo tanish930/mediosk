@@ -31,8 +31,22 @@ export function checkEmergencyRedFlags(answers: AnsweredQuestion[], complaint: s
     'sudden numbness',
     'slurred speech'
   ]
+
+  // Check for negations
+  const negationPatterns = ['no ', 'not ', 'none ', 'without ', 'never ', "don't ", "doesn't "]
+  
   for (const p of emergencyPatterns) {
-    if (combinedText.includes(p)) return true
+    if (combinedText.includes(p)) {
+      // Check if it's negated
+      let isNegated = false
+      for (const neg of negationPatterns) {
+        if (combinedText.includes(neg + p)) {
+          isNegated = true
+          break
+        }
+      }
+      if (!isNegated) return true
+    }
   }
 
   // Also check if severity is extremely high

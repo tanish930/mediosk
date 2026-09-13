@@ -3,6 +3,7 @@ import type { NextApiRequest, NextApiResponse } from 'next'
 import { prisma } from '../../../../../lib/prisma'
 import { z } from 'zod'
 import { getNextAdaptiveQuestion } from '../../../../../lib/adaptiveQuestioning'
+import { mapAnswersToReport } from '../../../../../lib/reportMapping'
 
 const AnswerSchema = z.object({ questionId: z.string().uuid(), value: z.any() })
 
@@ -97,22 +98,22 @@ if (!userId) {
       if (!current || current.patientId !== sess.patientId) return { error: 'Not found' as const }
       if (current.report) return { report: current.report, alreadyCompleted: true }
       
-      // Adapt report generation to use key-based answers
+      // Adapt report generation to use key-based answers, fallback to ID if key is null
       const answersByKey = new Map<string, unknown>()
       for (const question of current.questions) {
-        if (question.key && question.answer) {
-            answersByKey.set(question.key, question.answer.value)
+        if (question.answer) {
+            const key = question.key || question.id
+            answersByKey.set(key, question.answer.value)
         }
       }
+
+      const mappedData = mapAnswersToReport(answersByKey)
 
       const report = await tx.preConsultationReport.create({
         data: {
           sessionId: current.id,
           chiefComplaint: current.complaint,
-          onsetDuration: answersByKey.get('onset') as string | undefined,
-          location: answersByKey.get('location') as string | undefined,
-          severity: answersByKey.get('severity') as string | undefined,
-          associated: answersByKey.get('associated_symptoms') as any,
+          ...mappedData
         },
       })
       await tx.preConsultationSession.update({ where: { id: current.id }, data: { status: 'COMPLETED' } })
