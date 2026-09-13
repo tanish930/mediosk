@@ -277,6 +277,10 @@ model PreConsultationReport {
   relevantHistory    Json?
   currentMedications Json?
   allergies          Json?
+  pastSurgicalHistory String?
+  familyHistory      String?
+  personalSocialHistory String?
+  reviewOfSystems    String?
   otherInfo          Json?
   redFlags           Json?
   createdAt          DateTime               @default(now())

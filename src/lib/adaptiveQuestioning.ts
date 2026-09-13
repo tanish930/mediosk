@@ -254,18 +254,33 @@ export function getNextAdaptiveQuestion(
     return { key: 'relieving', text, type: 'TEXT' }
   }
 
-  // Step 9: History and medication context
-  if (!answeredKeys.has('context')) {
-    const text = domain === 'respiratory'
-      ? 'Do you have a history of asthma, COPD, smoking, or any family history of respiratory conditions?'
-      : domain === 'gastrointestinal'
-      ? 'Do you have any history of ulcers, gallstones, irritable bowel syndrome, or stomach surgeries?'
-      : domain === 'neurology'
-      ? 'Do you have a history of migraines, high blood pressure, or neurological disorders?'
-      : domain === 'musculoskeletal'
-      ? 'Do you have a history of arthritis, gout, osteoporosis, or previous joint/muscle issues?'
-      : 'Do you have any relevant medical history or are you taking any regular medications?'
-    return { key: 'context', text, type: 'TEXT' }
+  // Step 9: Comprehensive History Taking
+  if (!answeredKeys.has('past_medical_history')) {
+    return { key: 'past_medical_history', text: 'Do you have any ongoing medical conditions (e.g., Diabetes, Hypertension, Asthma)?', type: 'TEXT' }
+  }
+
+  if (!answeredKeys.has('past_surgical_history')) {
+    return { key: 'past_surgical_history', text: 'Have you had any surgeries or major procedures in the past?', type: 'TEXT' }
+  }
+
+  if (!answeredKeys.has('medication_history')) {
+    return { key: 'medication_history', text: 'Are you currently taking any regular medications or supplements?', type: 'TEXT' }
+  }
+
+  if (!answeredKeys.has('allergy_history')) {
+    return { key: 'allergy_history', text: 'Do you have any known allergies (medications, food, or environmental)?', type: 'TEXT' }
+  }
+
+  if (!answeredKeys.has('family_history')) {
+    return { key: 'family_history', text: 'Is there a history of similar symptoms or major illnesses in your family?', type: 'TEXT' }
+  }
+
+  if (!answeredKeys.has('personal_social_history')) {
+    return { key: 'personal_social_history', text: 'Please tell us about your lifestyle (e.g., smoking, alcohol consumption, diet, or occupation).', type: 'TEXT' }
+  }
+
+  if (!answeredKeys.has('review_of_systems')) {
+    return { key: 'review_of_systems', text: 'Are you experiencing any other symptoms unrelated to your main complaint (e.g., weight loss, fatigue, appetite changes)?', type: 'TEXT' }
   }
 
   return null
