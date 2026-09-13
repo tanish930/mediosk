@@ -5,7 +5,26 @@ import { z } from 'zod'
 
 const BodySchema = z.object({
   consultationId: z.string().uuid(),
+  doctorId: z.string().uuid().optional(),
 })
+
+const consultationInclude = {
+  patient: {
+    include: {
+      user: true,
+    },
+  },
+  doctor: {
+    include: {
+      user: true,
+    },
+  },
+  session: {
+    include: {
+      report: true,
+    },
+  },
+}
 
 export default async function handler(
   req: NextApiRequest,
@@ -37,9 +56,9 @@ export default async function handler(
     })
   }
 
-  if (role !== 'DOCTOR') {
+  if (role !== 'DOCTOR' && role !== 'HOSPITAL') {
     return res.status(403).json({
-      error: 'Only doctors can assign consultations',
+      error: 'Only doctors or hospitals can assign consultations',
     })
   }
 
@@ -52,20 +71,7 @@ export default async function handler(
     })
   }
 
-  const { consultationId } = parsed.data
-
-  const doctor = await prisma.doctor.findUnique({
-    where: {
-      userId,
-    },
-    include: { hospitalLinks: true },
-  })
-
-  if (!doctor) {
-    return res.status(404).json({
-      error: 'Doctor profile not found',
-    })
-  }
+  const { consultationId, doctorId } = parsed.data
 
   const consultation = await prisma.consultation.findUnique({
     where: {
@@ -91,9 +97,90 @@ export default async function handler(
     })
   }
 
-  if (consultation.hospitalId && !doctor.hospitalLinks.some((l: any) => l.hospitalId === consultation.hospitalId)) {
+  if (role === 'DOCTOR') {
+    const doctor = await prisma.doctor.findUnique({
+      where: {
+        userId,
+      },
+      include: { hospitalLinks: true },
+    })
+
+    if (!doctor) {
+      return res.status(404).json({
+        error: 'Doctor profile not found',
+      })
+    }
+
+    if (consultation.hospitalId && !doctor.hospitalLinks.some((l: any) => l.hospitalId === consultation.hospitalId)) {
+      return res.status(403).json({
+        error: 'Cannot assign a consultation from a hospital you are not linked to',
+      })
+    }
+
+    const updated = await prisma.consultation.update({
+      where: {
+        id: consultationId,
+      },
+      data: {
+        doctorId: doctor.id,
+        status: 'READY',
+        scheduledAt: new Date(),
+      },
+      include: consultationInclude,
+    })
+
+    return res.status(200).json({
+      consultation: updated,
+    })
+  }
+
+  if (!doctorId) {
+    return res.status(400).json({
+      error: 'doctorId is required',
+    })
+  }
+
+  const hospital = await prisma.hospital.findUnique({
+    where: {
+      userId,
+    },
+  })
+
+  if (!hospital) {
+    return res.status(404).json({
+      error: 'Hospital profile not found',
+    })
+  }
+
+  if (consultation.hospitalId !== hospital.id) {
     return res.status(403).json({
-      error: 'Cannot assign a consultation from a hospital you are not linked to',
+      error: 'Cannot assign a consultation from another hospital',
+    })
+  }
+
+  const targetDoctor = await prisma.doctor.findUnique({
+    where: {
+      id: doctorId,
+    },
+  })
+
+  if (!targetDoctor) {
+    return res.status(404).json({
+      error: 'Doctor not found',
+    })
+  }
+
+  const link = await prisma.hospitalDoctor.findFirst({
+    where: {
+      hospitalId: hospital.id,
+      doctorId: targetDoctor.id,
+      status: 'ACTIVE',
+    },
+  })
+
+  if (!link) {
+    return res.status(403).json({
+      error: 'Doctor is not active at this hospital',
     })
   }
 
@@ -102,27 +189,11 @@ export default async function handler(
       id: consultationId,
     },
     data: {
-      doctorId: doctor.id,
+      doctorId: targetDoctor.id,
       status: 'READY',
       scheduledAt: new Date(),
     },
-    include: {
-      patient: {
-        include: {
-          user: true,
-        },
-      },
-      doctor: {
-        include: {
-          user: true,
-        },
-      },
-      session: {
-        include: {
-          report: true,
-        },
-      },
-    },
+    include: consultationInclude,
   })
 
   return res.status(200).json({
