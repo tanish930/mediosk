@@ -30,7 +30,7 @@ if (!userId) {
   const { id } = req.query
   if (!id || typeof id !== 'string') return res.status(400).json({ error: 'Invalid id' })
 
-  const sess = await prisma.preConsultationSession.findUnique({ where: { id }, include: { questions: { orderBy: { order: 'asc' }, include: { answer: true } } } })
+  const sess = await prisma.preConsultationSession.findUnique({ where: { id }, include: { questions: { orderBy: { order: 'asc' }, include: { answer: true } }, report: true } })
   if (!sess || sess.patientId !== (await prisma.patient.findUnique({ where: { userId } }))?.id) return res.status(404).json({ error: 'Not found' })
 
   if (req.method === 'GET') {
