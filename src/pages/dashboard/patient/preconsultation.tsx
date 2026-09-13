@@ -20,6 +20,7 @@ export default function PreConsultationPage(){
   const [listening, setListening] = useState(false)
   const [transcript, setTranscript] = useState('')
   const [transcriptFinal, setTranscriptFinal] = useState<string | null>(null)
+  const [voiceError, setVoiceError] = useState<string | null>(null)
   const recognizerRef = useRef<any>(null)
 
   async function start(){
@@ -80,6 +81,7 @@ export default function PreConsultationPage(){
     }
 
     await loadSession(sessionId!)
+    stopVoiceRecognition()
   } catch (error) {
     console.error('Submit answer error:', error)
     alert('Could not submit answer. Check the terminal for errors.')
@@ -94,22 +96,39 @@ export default function PreConsultationPage(){
 
   function startListening(){
     if (!canUseSpeechRecognition()) return
-    setTranscript('')
-    setTranscriptFinal(null)
-    const handleResult = (t:string, isFinal:boolean)=>{
-      setTranscript(t)
-      if (isFinal) setTranscriptFinal(t)
-    }
-    const handleEnd = ()=>{ setListening(false) }
-    const r = createRecognizer(handleResult, handleEnd)
+    if (recognizerRef.current && recognizerRef.current.isListening()) return
+    setVoiceError(null)
+    const r = createRecognizer({
+      onResult: (t, isFinal) => {
+        if (recognizerRef.current !== r) return
+        setTranscript(t)
+        if (isFinal) setTranscriptFinal(t)
+      },
+      onEnd: () => {
+        if (recognizerRef.current !== r) return
+        recognizerRef.current = null
+        setListening(false)
+      },
+      onError: (info) => {
+        if (recognizerRef.current !== r) return
+        setVoiceError(info?.message || info?.error || 'Speech recognition failed. You can type your answer instead.')
+      },
+    })
     recognizerRef.current = r
     setListening(true)
     r.start()
   }
 
-  function stopListening(){
-    if (recognizerRef.current) recognizerRef.current.stop()
+  function stopVoiceRecognition(){
+    if (recognizerRef.current) {
+      recognizerRef.current.stop()
+      recognizerRef.current = null
+    }
     setListening(false)
+  }
+
+  function stopListening(){
+    stopVoiceRecognition()
   }
 
   async function finish(){
@@ -244,6 +263,7 @@ export default function PreConsultationPage(){
                 {listening && <button onClick={stopListening} className="px-2 py-1 bg-red-600 text-white rounded">Stop</button>}
               </div>
             )}
+            {voiceError && <div className="text-sm text-red-600 mt-1">{voiceError}</div>}
           </div>
 
           {q.type === 'TEXT' && (
