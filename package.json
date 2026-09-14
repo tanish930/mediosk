@@ -10,7 +10,7 @@
     "lint": "next lint",
     "prisma:generate": "prisma generate",
     "prisma:seed": "prisma db seed",
-    "process:jobs": "node ./dist/scripts/processJobs.js"
+    "process:jobs": "tsc --project tsconfig.scripts.json && node --env-file=.env.local ./dist/scripts/processJobs.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"

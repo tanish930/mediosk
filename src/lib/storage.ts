@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
 import fs from 'fs'
 import path from 'path'
 
@@ -17,11 +17,15 @@ if (provider === 's3') {
   })
 }
 
-export async function uploadFile(buffer: Buffer, key: string, contentType: string) {
-  // sanitize key to prevent path traversal
+function sanitizeKey(key: string) {
   key = key.replace(/\.\.+/g, '')
-    key = key.replace(/(^\/+|\/+$)/g, '')
+  key = key.replace(/(^\/+|\/+$)/g, '')
   key = key.split('..').join('')
+  return key
+}
+
+export async function uploadFile(buffer: Buffer, key: string, contentType: string) {
+  key = sanitizeKey(key)
   if (provider === 's3' && s3) {
     const bucket = process.env.S3_BUCKET!
     const cmd = new PutObjectCommand({ Bucket: bucket, Key: key, Body: buffer, ContentType: contentType, ACL: 'private' })
@@ -39,15 +43,13 @@ export async function uploadFile(buffer: Buffer, key: string, contentType: strin
   const filePath = path.join(uploadsDir, key)
   const resolved = path.resolve(filePath)
   if (!resolved.startsWith(path.resolve(uploadsDir))) throw new Error('Invalid upload key')
+  fs.mkdirSync(path.dirname(resolved), { recursive: true })
   fs.writeFileSync(resolved, buffer, { mode: 0o600 })
   return `/uploads/${key}`
 }
 
 export async function deleteFile(key: string) {
-  // sanitize key
-  key = key.replace(/\.\.+/g, '')
-    key = key.replace(/(^\/+|\/+$)/g, '')
-  key = key.split('..').join('')
+  key = sanitizeKey(key)
   if (provider === 's3' && s3) {
     const bucket = process.env.S3_BUCKET!
     const cmd = new DeleteObjectCommand({ Bucket: bucket, Key: key })
@@ -59,4 +61,26 @@ export async function deleteFile(key: string) {
   const resolved = path.resolve(filePath)
   if (!resolved.startsWith(path.resolve(uploadsDir))) throw new Error('Invalid delete key')
   if (fs.existsSync(resolved)) fs.unlinkSync(resolved)
+}
+
+export async function readFile(key: string): Promise<Buffer> {
+  key = sanitizeKey(key)
+  if (provider === 's3' && s3) {
+    const bucket = process.env.S3_BUCKET!
+    const cmd = new GetObjectCommand({ Bucket: bucket, Key: key })
+    const response = await s3.send(cmd)
+    if (!response.Body) throw new Error('File not found')
+    const chunks: Buffer[] = []
+    for await (const chunk of response.Body as unknown as AsyncIterable<Uint8Array>) {
+      chunks.push(Buffer.from(chunk))
+    }
+    return Buffer.concat(chunks)
+  }
+
+  const uploadsDir = path.join(process.cwd(), 'uploads')
+  const filePath = path.join(uploadsDir, key)
+  const resolved = path.resolve(filePath)
+  if (!resolved.startsWith(path.resolve(uploadsDir))) throw new Error('Invalid read key')
+  if (!fs.existsSync(resolved)) throw new Error('File not found')
+  return fs.readFileSync(resolved)
 }

@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": "dist",
+    "incremental": false,
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["src/scripts/processJobs.ts"],
+  "exclude": ["node_modules"]
+}

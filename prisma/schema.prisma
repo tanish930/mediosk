@@ -110,17 +110,21 @@ model DoctorVerification {
 }
 
 model MedicalDocument {
-  id           String                 @id @default(uuid())
-  patientId    String
-  title        String
-  url          String
-  category     String?
-  documentDate DateTime?
-  uploadedAt   DateTime               @default(now())
-  processing   DocumentProcessing[]
-  extractions  ExtractedMedicalData[]
-  patient      Patient                @relation(fields: [patientId], references: [id])
-  timelines    MedicalTimeline[]
+  id                      String                 @id @default(uuid())
+  patientId               String
+  title                   String
+  url                     String
+  category                String?
+  documentDate            DateTime?
+  mimeType                String?
+  size                    Int?
+  preConsultationSessionId String?
+  uploadedAt              DateTime               @default(now())
+  processing              DocumentProcessing[]
+  extractions             ExtractedMedicalData[]
+  patient                 Patient                @relation(fields: [patientId], references: [id])
+  preConsultationSession  PreConsultationSession? @relation(fields: [preConsultationSessionId], references: [id])
+  timelines               MedicalTimeline[]
 }
 
 model PatientComplaint {
@@ -237,6 +241,7 @@ model PreConsultationSession {
   report       PreConsultationReport?
   patient      Patient                @relation(fields: [patientId], references: [id])
   questions    SessionQuestion[]
+  documents    MedicalDocument[]
 }
 
 model SessionQuestion {
@@ -252,6 +257,8 @@ model SessionQuestion {
   answer     SessionAnswer?
   session    PreConsultationSession @relation(fields: [sessionId], references: [id])
   template   QuestionTemplate?      @relation(fields: [templateId], references: [id])
+
+  @@unique([sessionId, key])
 }
 
 model SessionAnswer {

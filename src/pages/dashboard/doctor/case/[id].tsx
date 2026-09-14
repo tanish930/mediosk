@@ -1,6 +1,10 @@
 import { useRouter } from 'next/router'
 import { getSession } from 'next-auth/react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import {
+  verificationFailureMessage,
+  verificationSuccessMessage,
+} from '../../../../lib/verificationFeedback'
 
 function displayReportValue(value: unknown): string {
   if (value === undefined || value === null || value === '') {
@@ -48,18 +52,36 @@ export default function CaseSheet() {
 
   const caseData = data?.consultation
 
+  const verifyingRef = useRef<Set<string>>(new Set())
+
   async function verify(
     targetType: string,
     targetId: string,
     status: string
   ) {
-    await fetch(`/api/doctor/case/${id}/verify`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ targetType, targetId, status }),
-    })
+    const key = `${targetType}:${targetId}:${status}`
+    if (verifyingRef.current.has(key)) return
+    verifyingRef.current.add(key)
 
-    alert('Verified')
+    try {
+      const res = await fetch(`/api/doctor/case/${id}/verify`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ targetType, targetId, status }),
+      })
+      const body = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        alert(verificationFailureMessage((body as any)?.error))
+        return
+      }
+
+      alert(verificationSuccessMessage(targetType, status))
+    } catch (err) {
+      alert(verificationFailureMessage(null))
+    } finally {
+      verifyingRef.current.delete(key)
+    }
   }
 
   if (!caseData) {
@@ -302,7 +324,7 @@ export default function CaseSheet() {
               <div>
                 URL:{' '}
                 <a
-                  href={d.url}
+                  href={`/api/doctor/documents/${d.id}/file`}
                   target="_blank"
                   rel="noreferrer"
                   className="text-sky-600"
@@ -371,13 +393,26 @@ export default function CaseSheet() {
 
                 <button
                   onClick={async () => {
-                    await fetch(`/api/doctor/ayush/verify/${ayush.id}`, {
-                      method: 'POST',
-                      headers: { 'content-type': 'application/json' },
-                      body: JSON.stringify({ status: 'VERIFIED' }),
-                    })
+                    const res = await fetch(
+                      `/api/doctor/ayush/verify/${ayush.id}`,
+                      {
+                        method: 'POST',
+                        headers: { 'content-type': 'application/json' },
+                        body: JSON.stringify({ status: 'VERIFIED' }),
+                      }
+                    )
+                    const body = await res.json().catch(() => null)
 
-                    alert('Verified')
+                    if (!res.ok) {
+                      alert(
+                        verificationFailureMessage((body as any)?.error)
+                      )
+                      return
+                    }
+
+                    alert(
+                      verificationSuccessMessage('AYUSH', 'VERIFIED')
+                    )
                   }}
                   className="ml-2 px-3 py-2 bg-green-600 text-white rounded"
                 >

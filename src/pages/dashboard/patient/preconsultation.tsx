@@ -22,6 +22,15 @@ export default function PreConsultationPage(){
   const [transcriptFinal, setTranscriptFinal] = useState<string | null>(null)
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const recognizerRef = useRef<any>(null)
+  const [answering, setAnswering] = useState(false)
+  const answeringRef = useRef(false)
+  const [intakeSkipped, setIntakeSkipped] = useState(false)
+  const [intakeVisible, setIntakeVisible] = useState(false)
+  const [intakeDocs, setIntakeDocs] = useState<any[]>([])
+  const [intakeFile, setIntakeFile] = useState<File | null>(null)
+  const [intakeTitle, setIntakeTitle] = useState('')
+  const [intakeUploading, setIntakeUploading] = useState(false)
+  const [intakeError, setIntakeError] = useState<string | null>(null)
 
   async function start(){
   setLoading(true)
@@ -61,7 +70,76 @@ export default function PreConsultationPage(){
     return ()=>{ if (recognizerRef.current && recognizerRef.current.isSupported) recognizerRef.current.stop() }
   },[])
 
+  async function loadIntakeDocs(){
+    if (!sessionId) return
+    try {
+      const r = await fetch(`/api/patient/documents?sessionId=${encodeURIComponent(sessionId)}`)
+      const j = await r.json()
+      setIntakeDocs(j.documents || [])
+    } catch { /* poll silently */ }
+  }
+
+  async function openIntake(){
+    setIntakeVisible(true)
+    await loadIntakeDocs()
+  }
+
+  async function uploadIntakeDoc(){
+    if (!intakeFile) return
+    setIntakeUploading(true)
+    setIntakeError(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', intakeFile)
+      fd.append('title', intakeTitle || intakeFile.name)
+      fd.append('sessionId', sessionId!)
+      const r = await fetch('/api/patient/documents', { method: 'POST', body: fd })
+      const j = await r.json()
+      if (!r.ok) {
+        setIntakeError(j.error || 'Upload failed')
+        return
+      }
+      setIntakeFile(null)
+      setIntakeTitle('')
+      await loadIntakeDocs()
+    } catch {
+      setIntakeError('Upload failed')
+    } finally {
+      setIntakeUploading(false)
+    }
+  }
+
+  async function retryIntakeDoc(id: string){
+    try { await fetch(`/api/patient/documents/${id}/retry`, { method: 'POST' }) } catch { /* ignore */ }
+    await loadIntakeDocs()
+  }
+
+  const hasActiveIntakeProcessing = intakeDocs.some((d:any)=> d.processing && (d.processing.status === 'PENDING' || d.processing.status === 'PROCESSING'))
+
+  useEffect(()=>{
+    if (!sessionId || !intakeVisible || !hasActiveIntakeProcessing) return
+    const iv = setInterval(()=>{
+      fetch(`/api/patient/documents?sessionId=${encodeURIComponent(sessionId)}`)
+        .then(r=>r.json())
+        .then(j=>setIntakeDocs(j.documents || []))
+        .catch(()=>{})
+    }, 8000)
+    return ()=>clearInterval(iv)
+  },[sessionId, intakeVisible, hasActiveIntakeProcessing])
+
+  function intakeStatusLabel(d:any): string {
+    const s = d.processing?.status
+    if (s === 'PENDING') return 'PENDING'
+    if (s === 'PROCESSING') return 'PROCESSING'
+    if (s === 'COMPLETED') return 'COMPLETED'
+    if (s === 'FAILED') return 'FAILED'
+    return 'UNPROCESSED'
+  }
+
   async function answer(questionId: string, value: any) {
+  if (answeringRef.current) return
+  answeringRef.current = true
+  setAnswering(true)
   try {
     const res = await fetch(
       `/api/patient/preconsult/session/${sessionId}`,
@@ -85,6 +163,9 @@ export default function PreConsultationPage(){
   } catch (error) {
     console.error('Submit answer error:', error)
     alert('Could not submit answer. Check the terminal for errors.')
+  } finally {
+    answeringRef.current = false
+    setAnswering(false)
   }
 }
 
@@ -270,7 +351,7 @@ export default function PreConsultationPage(){
             <div>
               <textarea className="w-full border p-2 rounded mb-2" value={transcriptFinal ?? transcript} onChange={e=>{ setTranscript(e.target.value); setTranscriptFinal(e.target.value) }} placeholder="Type or use voice" />
               <div className="flex space-x-2">
-                <button onClick={()=>{ if (transcriptFinal || transcript) answer(q.id, transcriptFinal ?? transcript); setTranscript(''); setTranscriptFinal(null) }} className="px-3 py-2 bg-sky-600 text-white rounded">Submit Answer</button>
+                <button onClick={()=>{ if (transcriptFinal || transcript) answer(q.id, transcriptFinal ?? transcript); setTranscript(''); setTranscriptFinal(null) }} disabled={answering} className="px-3 py-2 bg-sky-600 text-white rounded disabled:opacity-50">Submit Answer</button>
               </div>
             </div>
           )}
@@ -278,19 +359,19 @@ export default function PreConsultationPage(){
           {q.type === 'NUMBER' && (
             <div>
               <input type="number" className="w-full border p-2 rounded mb-2" value={transcriptFinal ?? transcript} onChange={e=>{ setTranscript(e.target.value); setTranscriptFinal(e.target.value) }} placeholder="Type or speak a number" />
-              <div className="flex space-x-2"><button onClick={()=>{ const val = Number(transcriptFinal ?? transcript); if (!Number.isNaN(val)) answer(q.id, val); setTranscript(''); setTranscriptFinal(null) }} className="px-3 py-2 bg-sky-600 text-white rounded">Submit</button></div>
+              <div className="flex space-x-2"><button onClick={()=>{ const val = Number(transcriptFinal ?? transcript); if (!Number.isNaN(val)) answer(q.id, val); setTranscript(''); setTranscriptFinal(null) }} disabled={answering} className="px-3 py-2 bg-sky-600 text-white rounded disabled:opacity-50">Submit</button></div>
             </div>
           )}
 
           {q.type === 'YESNO' && (
             <div>
-              <div className="space-x-2 mb-2"><button onClick={()=>answer(q.id, true)} className="px-3 py-2 bg-sky-600 text-white rounded">Yes</button><button onClick={()=>answer(q.id, false)} className="px-3 py-2 border rounded">No</button></div>
+              <div className="space-x-2 mb-2"><button onClick={()=>answer(q.id, true)} disabled={answering} className="px-3 py-2 bg-sky-600 text-white rounded disabled:opacity-50">Yes</button><button onClick={()=>answer(q.id, false)} disabled={answering} className="px-3 py-2 border rounded disabled:opacity-50">No</button></div>
               {voiceMode && (
                 <div>
                   <div className="mb-2">Spoken transcription (edit if needed):</div>
                   <input className="w-full border p-2 rounded mb-2" value={transcriptFinal ?? transcript} onChange={e=>{ setTranscript(e.target.value); setTranscriptFinal(e.target.value) }} />
                   <div className="space-x-2">
-                    <button onClick={()=>{ const t=(transcriptFinal ?? transcript).toLowerCase(); if (t.includes('yes')) answer(q.id, true); else if (t.includes('no')) answer(q.id, false); else alert('Could not detect yes/no confidently. Please edit and submit.'); setTranscript(''); setTranscriptFinal(null) }} className="px-3 py-2 bg-sky-600 text-white rounded">Submit Spoken Answer</button>
+                    <button onClick={()=>{ const t=(transcriptFinal ?? transcript).toLowerCase(); if (t.includes('yes')) answer(q.id, true); else if (t.includes('no')) answer(q.id, false); else alert('Could not detect yes/no confidently. Please edit and submit.'); setTranscript(''); setTranscriptFinal(null) }} disabled={answering} className="px-3 py-2 bg-sky-600 text-white rounded disabled:opacity-50">Submit Spoken Answer</button>
                   </div>
                 </div>
               )}
@@ -300,6 +381,52 @@ export default function PreConsultationPage(){
       ) : (
         <div className="max-w-md">
           <div className="mb-2">All questions answered.</div>
+
+          {!intakeSkipped && !intakeVisible && (
+            <div className="mb-4 border rounded p-4">
+              <div className="mb-2 font-medium">Do you have any previous medical documents?</div>
+              <div className="space-x-2">
+                <button onClick={openIntake} className="px-3 py-2 bg-sky-600 text-white rounded">Yes, upload documents</button>
+                <button onClick={() => setIntakeSkipped(true)} className="px-3 py-2 border rounded">No — continue</button>
+              </div>
+            </div>
+          )}
+
+          {intakeVisible && (
+            <div className="mb-4 border rounded p-4">
+              <div className="font-medium mb-2">Previous medical documents</div>
+              <div className="mb-2">
+                <input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/png,image/jpeg" onChange={e=>setIntakeFile(e.target.files?.[0]||null)} />
+              </div>
+              <div className="mb-2 flex space-x-2">
+                <input placeholder="Document title (optional)" value={intakeTitle} onChange={e=>setIntakeTitle(e.target.value)} className="w-full border p-2 rounded" />
+                <button disabled={!intakeFile || intakeUploading} onClick={uploadIntakeDoc} className="px-3 py-2 bg-sky-600 text-white rounded disabled:opacity-50">{intakeUploading ? 'Uploading...' : 'Upload'}</button>
+              </div>
+              {intakeError && <div className="text-sm text-red-600 mb-2">{intakeError}</div>}
+              {intakeDocs.length > 0 && (
+                <div className="space-y-2 mb-2">
+                  {intakeDocs.map((d:any) => (
+                    <div key={d.id} className="border rounded p-2 text-sm">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <div className="font-medium">{d.title}</div>
+                          <div className="text-slate-500">Status: {intakeStatusLabel(d)} • {d.uploadedAt ? new Date(d.uploadedAt).toLocaleString() : ''}</div>
+                        </div>
+                        <div className="space-x-2">
+                          <a href={`/api/patient/documents/${d.id}/file`} target="_blank" rel="noreferrer" className="text-sky-600">View</a>
+                          {d.processing?.status === 'FAILED' && <button onClick={()=>retryIntakeDoc(d.id)} className="px-2 py-1 border rounded">Retry</button>}
+                        </div>
+                      </div>
+                      {d.processing?.status === 'FAILED' && d.processing?.error && <div className="text-red-600 mt-1">{d.processing.error}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="text-xs text-slate-500 mb-2">Documents continue processing in the background; you may proceed without waiting.</div>
+              <button onClick={() => { setIntakeVisible(false); setIntakeSkipped(true) }} className="px-3 py-2 border rounded">Continue</button>
+            </div>
+          )}
+
           {!sessionData.session.report && <button onClick={finish} className="px-3 py-2 bg-sky-600 text-white rounded">Finish and create Symptom Report</button>}
           {sessionData.session.report && !submitted && !showHospitalPickerForStandard && <button onClick={() => { setShowHospitalPickerForStandard(true); openHospitalPicker(); }} className="px-3 py-2 bg-sky-600 text-white rounded">Select Hospital & Submit</button>}
 

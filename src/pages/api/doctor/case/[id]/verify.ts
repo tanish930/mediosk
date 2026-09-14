@@ -1,4 +1,4 @@
-import { getSession } from 'next-auth/react'
+import { getToken } from 'next-auth/jwt'
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { prisma } from '../../../../../lib/prisma'
 import { z } from 'zod'
@@ -7,10 +7,10 @@ const BodySchema = z.object({ targetType: z.string(), targetId: z.string().uuid(
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse){
   if (req.method !== 'POST') return res.status(405).end()
-  const session = await getSession({ req })
-  if (!session) return res.status(401).json({ error: 'Unauthorized' })
-  const userId = (session as any).user?.id
-  const role = (session as any).user?.role
+  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET })
+  if (!token) return res.status(401).json({ error: 'Unauthorized' })
+  const userId = token.id as string
+  const role = token.role as string
   if (role !== 'DOCTOR') return res.status(403).json({ error: 'Forbidden' })
 
   const { id } = req.query
@@ -29,6 +29,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const assigned = consultation.doctorId === doctor.id
   const consent = await prisma.consent.findFirst({ where: { patientId: consultation.patientId, granteeDoctorId: doctor.id, granted: true } })
   if (!assigned && !consent) return res.status(403).json({ error: 'Access denied' })
+
+  // avoid duplicate verification records when the same button is clicked repeatedly
+  const existing = await prisma.doctorVerification.findFirst({
+    where: { doctorId: doctor.id, targetType, targetId, status },
+    orderBy: { createdAt: 'desc' },
+  })
+  if (existing) return res.json({ ok: true, verification: existing })
 
   const v = await prisma.doctorVerification.create({ data: { doctorId: doctor.id, targetType, targetId, status, note } })
   return res.json({ ok: true, verification: v })

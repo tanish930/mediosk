@@ -46,7 +46,7 @@ if (!userId) {
     const { questionId, value } = parsed.data
     const q = await prisma.sessionQuestion.findUnique({ where: { id: questionId } })
     if (!q || q.sessionId !== id) return res.status(400).json({ error: 'Invalid question' })
-    
+
     await prisma.$transaction(async (tx) => {
       await tx.sessionAnswer.upsert({
         where: { questionId },
@@ -57,31 +57,34 @@ if (!userId) {
     })
 
     // Dynamically get next question
-    const updatedSess = await prisma.preConsultationSession.findUnique({ 
-        where: { id }, 
-        include: { questions: { include: { answer: true } } } 
+    const updatedSess = await prisma.preConsultationSession.findUnique({
+        where: { id },
+        include: { questions: { include: { answer: true } } }
     })
-    
+
     if (!updatedSess) return res.status(500).json({ error: 'Failed to fetch updated session' })
-    
+
     const answers = updatedSess.questions
         .filter(q => q.answered && q.key && q.answer)
         .map(q => ({ key: q.key!, value: q.answer!.value }))
-    
+
     const nextQ = getNextAdaptiveQuestion(sess.domain || 'general', answers, sess.complaint)
-    
+
     if (nextQ) {
-        await prisma.sessionQuestion.create({ 
-            data: { 
-                sessionId: id, 
-                text: nextQ.text, 
-                type: nextQ.type, 
+        // Idempotent: (sessionId, key) is unique, so concurrent answers for the
+        // same question can never create duplicate follow-up question rows.
+        await prisma.sessionQuestion.createMany({
+            data: [{
+                sessionId: id,
+                text: nextQ.text,
+                type: nextQ.type,
                 key: nextQ.key,
-                order: updatedSess.questions.length 
-            } 
+                order: updatedSess.questions.length
+            }],
+            skipDuplicates: true
         })
     }
-    
+
     return res.json({ ok: true })
   }
 
@@ -89,7 +92,7 @@ if (!userId) {
     // ... (Keep existing implementation for PUT as it works for completion)
     // ... (Wait, actually need to update this to handle adaptive flow if needed, but the current report logic works by looking up questions)
     // Actually the current PUT logic relies on BANK, this needs to be updated.
-    
+
     const result = await prisma.$transaction(async (tx) => {
       const current = await tx.preConsultationSession.findUnique({
         where: { id },
@@ -97,7 +100,7 @@ if (!userId) {
       })
       if (!current || current.patientId !== sess.patientId) return { error: 'Not found' as const }
       if (current.report) return { report: current.report, alreadyCompleted: true }
-      
+
       // Adapt report generation to use key-based answers, fallback to ID if key is null
       const answersByKey = new Map<string, unknown>()
       for (const question of current.questions) {

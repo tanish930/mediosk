@@ -9,7 +9,17 @@ export default function DocumentsPage(){
   const [category, setCategory] = useState('')
   const [date, setDate] = useState('')
 
-  useEffect(()=>{ fetch('/api/patient/documents').then(r=>r.json()).then(d=>{ setDocs(d.documents); setLoading(false) }) },[])
+  async function loadDocs(){
+    try {
+      const r = await fetch('/api/patient/documents')
+      const d = await r.json()
+      setDocs(d.documents || [])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(()=>{ loadDocs() },[])
 
   async function upload(){
     if (!file) return
@@ -19,14 +29,28 @@ export default function DocumentsPage(){
     fd.append('category', category)
     fd.append('documentDate', date)
     const res = await fetch('/api/patient/documents',{method:'POST',body:fd})
-    const data = await res.json()
-    setDocs(prev=>[data.document,...prev])
+    await res.json()
+    await loadDocs()
   }
 
   async function remove(id:string){
     if (!confirm('Delete document?')) return
-    await fetch(`/api/patient/documents/${id}`,{method:'DELETE'})
-    setDocs(prev=>prev.filter(d=>d.id!==id))
+    const r = await fetch(`/api/patient/documents/${id}`,{method:'DELETE'})
+    if (r.ok) setDocs(prev=>prev.filter(d=>d.id!==id))
+  }
+
+  async function retry(id:string){
+    await fetch(`/api/patient/documents/${id}/retry`,{method:'POST'})
+    await loadDocs()
+  }
+
+  function statusLabel(d:any): string {
+    const s = d.processing?.status
+    if (s === 'PENDING') return 'PENDING'
+    if (s === 'PROCESSING') return 'PROCESSING'
+    if (s === 'COMPLETED') return 'COMPLETED'
+    if (s === 'FAILED') return 'FAILED'
+    return 'UNPROCESSED'
   }
 
   if (loading) return <div className="container py-20">Loading...</div>
@@ -37,7 +61,7 @@ export default function DocumentsPage(){
 
       <div className="max-w-md border rounded p-4 mb-6">
         <div className="mb-2">
-          <input type="file" onChange={e=>setFile(e.target.files?.[0]||null)} />
+          <input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/png,image/jpeg" onChange={e=>setFile(e.target.files?.[0]||null)} />
         </div>
         <div className="mb-2"><input placeholder="Title" value={title} onChange={e=>setTitle(e.target.value)} className="w-full border p-2 rounded" /></div>
         <div className="mb-2"><input placeholder="Category" value={category} onChange={e=>setCategory(e.target.value)} className="w-full border p-2 rounded" /></div>
@@ -45,17 +69,28 @@ export default function DocumentsPage(){
         <div><button onClick={upload} className="px-3 py-2 bg-sky-600 text-white rounded">Upload</button></div>
       </div>
 
+      {docs.length === 0 && <div className="text-slate-500 mb-4">No documents uploaded yet.</div>}
+
       <div className="space-y-3">
         {docs.map(d=> (
-          <div key={d.id} className="border rounded p-3 flex justify-between items-center">
-            <div>
-              <div className="font-medium">{d.title}</div>
-              <div className="text-sm text-slate-600">{d.category} • {d.documentDate ? new Date(d.documentDate).toLocaleDateString() : new Date(d.uploadedAt).toLocaleDateString()}</div>
+          <div key={d.id} className="border rounded p-3">
+            <div className="flex justify-between items-center">
+              <div>
+                <div className="font-medium">{d.title}</div>
+                <div className="text-sm text-slate-600">{d.category ? `${d.category} • ` : ''}Uploaded {d.uploadedAt ? new Date(d.uploadedAt).toLocaleDateString() : ''} {d.documentDate ? `• Document date ${new Date(d.documentDate).toLocaleDateString()}` : ''}</div>
+              </div>
+              <div className="space-x-2">
+                <a href={`/api/patient/documents/${d.id}/file`} target="_blank" rel="noreferrer" className="text-sky-600">View</a>
+                <button onClick={()=>remove(d.id)} className="text-red-600">Delete</button>
+              </div>
             </div>
-            <div className="space-x-2">
-              <a href={d.url} target="_blank" rel="noreferrer" className="text-sky-600">View</a>
-              <button onClick={()=>remove(d.id)} className="text-red-600">Delete</button>
+            <div className="mt-2 flex items-center space-x-3 text-sm">
+              <span className={d.processing?.status === 'FAILED' ? 'text-red-600' : d.processing?.status === 'COMPLETED' ? 'text-emerald-600' : 'text-slate-500'}>
+                Processing: {statusLabel(d)}
+              </span>
+              {d.processing?.status === 'FAILED' && <button onClick={()=>retry(d.id)} className="px-2 py-1 border rounded">Retry</button>}
             </div>
+            {d.processing?.status === 'FAILED' && d.processing?.error && <div className="text-sm text-red-600 mt-1">{d.processing.error}</div>}
           </div>
         ))}
       </div>

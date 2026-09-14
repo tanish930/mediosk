@@ -25,7 +25,7 @@ if (role !== 'DOCTOR') {
   const doctor = await prisma.doctor.findUnique({ where: { userId } })
   if (!doctor) return res.status(404).json({ error: 'Doctor not found' })
 
-  const consultation = await prisma.consultation.findUnique({ where: { id }, include: { patient: { include: { user: true, summaries: true, documents: { include: { extractions: true } }, timelines: true } }, session: { include: { questions: { include: { answer: true } }, report: true } } } })
+  const consultation = await prisma.consultation.findUnique({ where: { id }, include: { patient: { include: { user: true, summaries: true, timelines: true } }, session: { include: { questions: { include: { answer: true } }, report: true } } } })
 
   if (!consultation) return res.status(404).json({ error: 'Consultation not found' })
 
@@ -36,7 +36,9 @@ if (role !== 'DOCTOR') {
 
   // Gather AI/extracted items and latest summary
   const summaries = await prisma.medicalSummary.findMany({ where: { patientId: consultation.patientId }, orderBy: { createdAt: 'desc' }, take: 5 })
-  const documents = await prisma.medicalDocument.findMany({ where: { patientId: consultation.patientId }, include: { extractions: true } })
+  const documents = consultation.sessionId
+    ? await prisma.medicalDocument.findMany({ where: { patientId: consultation.patientId, preConsultationSessionId: consultation.sessionId }, include: { extractions: true } })
+    : []
   const timelines = await prisma.medicalTimeline.findMany({ where: { patientId: consultation.patientId }, orderBy: { date: 'desc' } })
 
   return res.json({ consultation, summaries, documents, timelines })
