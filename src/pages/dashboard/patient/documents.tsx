@@ -8,6 +8,10 @@ export default function DocumentsPage(){
   const [title, setTitle] = useState('')
   const [category, setCategory] = useState('')
   const [date, setDate] = useState('')
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [retryingId, setRetryingId] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [retryError, setRetryError] = useState<string | null>(null)
 
   async function loadDocs(){
     try {
@@ -34,14 +38,39 @@ export default function DocumentsPage(){
   }
 
   async function remove(id:string){
-    if (!confirm('Delete document?')) return
-    const r = await fetch(`/api/patient/documents/${id}`,{method:'DELETE'})
-    if (r.ok) setDocs(prev=>prev.filter(d=>d.id!==id))
+    if (!confirm('Delete document? This cannot be undone.')) return
+    setDeleteError(null)
+    setDeletingId(id)
+    try {
+      const r = await fetch(`/api/patient/documents/${id}`,{method:'DELETE'})
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}))
+        setDeleteError(body.error || 'We could not delete this document right now. Please try again.')
+        return
+      }
+      setDocs(prev=>prev.filter(d=>d.id!==id))
+    } catch {
+      setDeleteError('We could not delete this document right now. Please check your connection and try again.')
+    } finally {
+      setDeletingId(null)
+    }
   }
 
   async function retry(id:string){
-    await fetch(`/api/patient/documents/${id}/retry`,{method:'POST'})
-    await loadDocs()
+    setRetryError(null)
+    setRetryingId(id)
+    try {
+      const r = await fetch(`/api/patient/documents/${id}/retry`,{method:'POST'})
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}))
+        setRetryError(body.error || 'We could not retry this document. Please try again.')
+      }
+    } catch {
+      setRetryError('We could not retry this document. Please check your connection and try again.')
+    } finally {
+      setRetryingId(null)
+      await loadDocs()
+    }
   }
 
   function statusLabel(d:any): string {
@@ -69,6 +98,18 @@ export default function DocumentsPage(){
         <div><button onClick={upload} className="px-3 py-2 bg-sky-600 text-white rounded">Upload</button></div>
       </div>
 
+      {deleteError && (
+        <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm mb-4" role="alert">
+          {deleteError}
+        </div>
+      )}
+
+      {retryError && (
+        <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm mb-4" role="alert">
+          {retryError}
+        </div>
+      )}
+
       {docs.length === 0 && <div className="text-slate-500 mb-4">No documents uploaded yet.</div>}
 
       <div className="space-y-3">
@@ -81,16 +122,26 @@ export default function DocumentsPage(){
               </div>
               <div className="space-x-2">
                 <a href={`/api/patient/documents/${d.id}/file`} target="_blank" rel="noreferrer" className="text-sky-600">View</a>
-                <button onClick={()=>remove(d.id)} className="text-red-600">Delete</button>
+                <button onClick={()=>remove(d.id)} disabled={deletingId === d.id} className="text-red-600 disabled:opacity-50 disabled:cursor-not-allowed">
+                  {deletingId === d.id ? 'Deleting...' : 'Delete'}
+                </button>
               </div>
             </div>
             <div className="mt-2 flex items-center space-x-3 text-sm">
               <span className={d.processing?.status === 'FAILED' ? 'text-red-600' : d.processing?.status === 'COMPLETED' ? 'text-emerald-600' : 'text-slate-500'}>
                 Processing: {statusLabel(d)}
               </span>
-              {d.processing?.status === 'FAILED' && <button onClick={()=>retry(d.id)} className="px-2 py-1 border rounded">Retry</button>}
+              {d.processing?.status === 'FAILED' && (
+                <button onClick={()=>retry(d.id)} disabled={retryingId === d.id} className="px-2 py-1 border rounded disabled:opacity-50 disabled:cursor-not-allowed">
+                  {retryingId === d.id ? 'Retrying...' : 'Retry'}
+                </button>
+              )}
             </div>
-            {d.processing?.status === 'FAILED' && d.processing?.error && <div className="text-sm text-red-600 mt-1">{d.processing.error}</div>}
+            {d.processing?.status === 'FAILED' && (
+              <div className="text-sm text-red-600 mt-1">
+                Processing failed. You can retry the document or continue without it.
+              </div>
+            )}
           </div>
         ))}
       </div>

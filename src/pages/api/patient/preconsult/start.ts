@@ -24,12 +24,26 @@ if (!userId) {
   return res.status(401).json({ error: 'Unauthorized: missing user id' })
 }
 
+if (token.role !== 'PATIENT') {
+  return res.status(403).json({ error: 'Forbidden' })
+}
+
   const parsed = BodySchema.safeParse(req.body)
   if (!parsed.success) return res.status(400).json({ error: 'Invalid body', details: parsed.error.errors })
   const { complaint } = parsed.data
 
   const patient = await prisma.patient.findUnique({ where: { userId } })
   if (!patient) return res.status(404).json({ error: 'Patient not found' })
+
+  // Business rule: do not allow a patient to start a new consultation while a
+  // live consultation is already in progress. Enforced server-side, not on the
+  // frontend. Completed, cancelled, or scheduled consultations do not block.
+  const activeConsultation = await prisma.consultation.findFirst({
+    where: { patientId: patient.id, status: 'IN_PROGRESS' },
+  })
+  if (activeConsultation) {
+    return res.status(409).json({ error: 'ACTIVE_CONSULTATION_IN_PROGRESS' })
+  }
 
   const domain = detectDomainFromComplaint(complaint)
 

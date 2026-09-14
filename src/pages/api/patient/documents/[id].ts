@@ -26,11 +26,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   if (req.method === 'DELETE') {
+    // delete related rows first: the schema defines no cascade, so deleting the
+    // document directly would fail with a foreign key constraint violation
+    await prisma.$transaction([
+      prisma.documentProcessing.deleteMany({ where: { documentId: id } }),
+      prisma.extractedMedicalData.deleteMany({ where: { documentId: id } }),
+      prisma.medicalTimeline.updateMany({ where: { sourceDocumentId: id }, data: { sourceDocumentId: null } }),
+      prisma.medicalDocument.delete({ where: { id } }),
+    ])
     // assume url contains key after bucket/ or /uploads/
     const key = doc.url.split('/').slice(-2).join('/')
-    await deleteFile(key)
-    await prisma.medicalDocument.delete({ where: { id } })
-    await prisma.accessAudit.create({ data: { actorId: userId, actorRole: 'PATIENT', patientId: patient.id, action: 'DOCUMENT_DELETE', note: `Deleted ${id}` } })
+    try {
+      await deleteFile(key)
+    } catch (err) {
+      console.error('document delete: file cleanup failed', err)
+    }
+    try {
+      await prisma.accessAudit.create({ data: { actorId: userId, actorRole: 'PATIENT', patientId: patient.id, action: 'DOCUMENT_DELETE', note: `Deleted ${id}` } })
+    } catch (err) {
+      console.error('document delete: audit failed', err)
+    }
     return res.json({ ok: true })
   }
   res.setHeader('Allow', 'DELETE')

@@ -14,20 +14,22 @@ export default async function handler(req:NextApiRequest,res:NextApiResponse){
 
  const consultations = await prisma.consultation.findMany({
   where: {
-    patientId: patient.id,
-    status: {
-      in: ['REQUESTED', 'SCHEDULED', 'IN_PROGRESS', 'READY']
-    }
+    patientId: patient.id
   },
   include: {
     doctor: {
       include: {
         user: true
       }
+    },
+    hospital: {
+      include: {
+        user: true
+      }
     }
   },
   orderBy: {
-    scheduledAt: 'asc'
+    createdAt: 'desc'
   }
 })
   return res.json({ consultations })
