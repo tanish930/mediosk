@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN     "deactivatedAt" TIMESTAMP(3),
+ADD COLUMN     "preferredLanguage" TEXT NOT NULL DEFAULT 'en',
+ADD COLUMN     "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;

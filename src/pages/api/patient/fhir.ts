@@ -99,9 +99,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const bundle = { resourceType: 'Bundle', type: 'document', entry: resources.map(r=>({ resource: r })) }
   // record audit
   await prisma.accessAudit.create({ data: { actorId: user.id, actorRole: 'PATIENT', patientId: patient.id, action: 'FHIR_EXPORT', note: 'Patient exported FHIR bundle' } })
-    await prisma.accessAudit.create({ data: { actorId: user.id, actorRole: 'PATIENT', patientId: patient.id, action: 'FHIR_EXPORT', note: 'Patient exported FHIR bundle' } })
-    res.setHeader('Content-Type','application/fhir+json')
-    return res.status(200).json(bundle)
+  res.setHeader('Content-Type', 'application/fhir+json')
+  return res.status(200).send(JSON.stringify(bundle))
   } catch (err) {
     console.error('patient fhir export error', err)
     return res.status(500).json({ error: 'Internal server error' })

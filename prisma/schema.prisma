@@ -8,15 +8,18 @@ datasource db {
 }
 
 model User {
-  id             String    @id @default(uuid())
-  name           String?
-  email          String    @unique
-  role           Role
-  hashedPassword String
-  createdAt      DateTime  @default(now())
-  doctor         Doctor?
-  hospital       Hospital?
-  patient        Patient?
+  id               String            @id @default(uuid())
+  name             String?
+  email            String            @unique
+  role             Role
+  hashedPassword   String
+  preferredLanguage String           @default("en")
+  deactivatedAt    DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  doctor           Doctor?
+  hospital         Hospital?
+  patient          Patient?
 }
 
 model Patient {

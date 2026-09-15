@@ -3,9 +3,9 @@ import type { NextApiRequest, NextApiResponse } from 'next'
 import { prisma } from '../../../lib/prisma'
 import { z } from 'zod'
 
-const BodySchema = z.object({
-  address: z.string().trim().max(500, 'Address must be under 500 characters.').optional(),
+const PutSchema = z.object({
   name: z.string().trim().min(1, 'Full name is required.').max(100, 'Full name must be under 100 characters.').optional(),
+  speciality: z.string().trim().max(120, 'Specialty must be under 120 characters.').optional(),
 })
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -14,31 +14,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const role = (session as any).user?.role
   const userId = (session as any).user?.id
   if (!userId) return res.status(401).json({ error: 'Unauthorized' })
-  if (role !== 'HOSPITAL') return res.status(403).json({ error: 'Forbidden' })
+  if (role !== 'DOCTOR') return res.status(403).json({ error: 'Forbidden' })
 
-  const hospital = await prisma.hospital.findUnique({
+  const doctor = await prisma.doctor.findUnique({
     where: { userId },
     include: { user: { select: { id: true, name: true, email: true } } },
   })
-  if (!hospital) return res.status(404).json({ error: 'Hospital not found' })
+  if (!doctor) return res.status(404).json({ error: 'Doctor not found' })
 
   if (req.method === 'GET') {
-    return res.json({ hospital })
+    return res.json({ doctor })
   }
 
   if (req.method === 'PUT') {
-    const parsed = BodySchema.safeParse(req.body)
+    const parsed = PutSchema.safeParse(req.body)
     if (!parsed.success) return res.status(400).json({ error: 'Invalid body', errors: parsed.error.flatten().fieldErrors })
-    const data: { address?: string } = {}
-    if (parsed.data.address !== undefined) data.address = parsed.data.address
-    if (parsed.data.name !== undefined) await prisma.user.update({ where: { id: hospital.userId }, data: { name: parsed.data.name } })
-    const updated = await prisma.hospital.update({
-      where: { id: hospital.id },
+
+    const data: { speciality?: string } = {}
+    if (parsed.data.speciality !== undefined) data.speciality = parsed.data.speciality
+    if (parsed.data.name !== undefined) await prisma.user.update({ where: { id: userId }, data: { name: parsed.data.name } })
+
+    const updated = await prisma.doctor.update({
+      where: { id: doctor.id },
       data,
       include: { user: { select: { id: true, name: true, email: true } } },
     })
-    await prisma.accessAudit.create({ data: { actorId: userId, actorRole: role, patientId: '', action: 'HOSPITAL_PROFILE_UPDATED', note: 'Profile updated' } })
-    return res.json({ hospital: updated })
+    await prisma.accessAudit.create({ data: { actorId: userId, actorRole: role, patientId: '', action: 'DOCTOR_PROFILE_UPDATED', note: 'Doctor profile updated' } })
+    return res.json({ doctor: updated })
   }
 
   res.setHeader('Allow', 'GET,PUT')

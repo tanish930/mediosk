@@ -1,17 +1,18 @@
 import { z } from 'zod'
-import { getSession } from 'next-auth/react'
+import { getToken } from 'next-auth/jwt'
 import { NextApiRequest, NextApiResponse } from 'next'
 import { prisma } from '../../../lib/prisma'
 
 const PutSchema = z.object({ abhaId: z.string().min(1).optional().nullable() })
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse){
-  const session = await getSession({ req })
-  if (!session) return res.status(401).json({ error: 'unauthenticated' })
-  const role = (session as any).user?.role
+  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET })
+  if (!token) return res.status(401).json({ error: 'unauthenticated' })
+  const role = token.role as string
   if (role !== 'PATIENT') return res.status(403).json({ error: 'forbidden' })
 
-  const userId = (session as any).user.id
+  const userId = token.id as string
+  if (!userId) return res.status(401).json({ error: 'unauthenticated' })
   const patient = await prisma.patient.findUnique({ where: { userId } })
   if (!patient) return res.status(404).json({ error: 'patient_not_found' })
 

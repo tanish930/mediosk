@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { getSession } from 'next-auth/react'
 import { useEffect, useState } from 'react'
+import AccountNav from '../../../components/AccountNav'
 
 export default function DoctorDashboard() {
   const [consultations, setConsultations] = useState<any[]>([])
@@ -60,7 +61,9 @@ export default function DoctorDashboard() {
   }
 
   return (
-    <main className="container py-8">
+    <>
+      <AccountNav profileHref="/dashboard/doctor/profile" dashboardHref="/dashboard/doctor" />
+      <main className="container py-8">
       <h1 className="text-2xl font-semibold mb-4">
         Todays Consultations
       </h1>
@@ -149,7 +152,8 @@ export default function DoctorDashboard() {
           })}
         </div>
       )}
-    </main>
+      </main>
+    </>
   )
 }
 
