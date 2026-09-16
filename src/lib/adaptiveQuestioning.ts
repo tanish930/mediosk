@@ -14,12 +14,98 @@ export interface AdaptiveQuestion {
 
 export { checkEmergencyRedFlags }
 
+// Keys asked only in AYURVEDA-mode sessions. These are self-reported /
+// self-observable questions; clinical-appraisal items stay doctor-side.
+export const AYURVEDA_QUESTION_KEYS = [
+  'ayush_nidana',
+  'ayush_agni',
+  'ayush_koshtha',
+  'ayush_ahara_vihara',
+  'ayush_mala',
+  'ayush_mutra',
+  'ayush_samprapti',
+  'ayush_prakriti',
+  'ayush_vikriti',
+  'ayush_vaya',
+  'ayush_satmya',
+  'ayush_sattva',
+  'ayush_vyayama_shakti',
+] as const
+
+function getNextAyurvedaQuestion(
+  domain: string,
+  answeredKeys: Set<string>
+): AdaptiveQuestion | null {
+  const has = (key: string) => answeredKeys.has(key)
+
+  if (!has('ayush_nidana')) {
+    return { key: 'ayush_nidana', text: 'What do you think may have caused or started this problem? Describe it in your own words as best as you can.', type: 'TEXT' }
+  }
+
+  if (!has('ayush_agni')) {
+    return { key: 'ayush_agni', text: 'How would you describe your appetite and digestion at present? (For example, hungry as usual, poor appetite, heavy feeling after meals.)', type: 'TEXT' }
+  }
+
+  if (!has('ayush_koshtha')) {
+    return { key: 'ayush_koshtha', text: 'How would you describe your usual bowel habit? (For example, regular, once every few days, loose most days.)', type: 'TEXT' }
+  }
+
+  if (!has('ayush_ahara_vihara')) {
+    return { key: 'ayush_ahara_vihara', text: 'Describe your usual food, sleep, and daily routine (for example, what you usually eat, your sleep timings, and physical activity).', type: 'TEXT' }
+  }
+
+  // Mala / Mutra are only relevant when the complaint points to the
+  // gastrointestinal system.
+  if (domain === 'gastrointestinal' && !has('ayush_mala')) {
+    return { key: 'ayush_mala', text: 'Have you noticed any change in your stool (bowel movements) with this problem? Describe in your own words.', type: 'TEXT' }
+  }
+
+  if (domain === 'gastrointestinal' && !has('ayush_mutra')) {
+    return { key: 'ayush_mutra', text: 'Have you noticed any change in your urine with this problem? Describe in your own words.', type: 'TEXT' }
+  }
+
+  // Samprapti is asked once onset/aggravating course is known (the general
+  // core is complete before this branch runs).
+  if (!has('ayush_samprapti')) {
+    return { key: 'ayush_samprapti', text: 'How has this problem developed since it began? (For example, slowly over days, sudden, coming and going.)', type: 'TEXT' }
+  }
+
+  // Dashavidha: recollection of prior knowledge and plain self-observable
+  // facts. No classification is inferred from any of these answers.
+  if (!has('ayush_prakriti')) {
+    return { key: 'ayush_prakriti', text: 'Has an Ayurvedic practitioner ever told you your Prakriti (body constitution)? If yes, describe it in your own words. Otherwise you can say Not sure.', type: 'TEXT' }
+  }
+
+  if (!has('ayush_vikriti')) {
+    return { key: 'ayush_vikriti', text: 'Have you ever been told about an imbalance of Vata, Pitta, or Kapha in relation to this or any past illness? If yes, describe it in your own words, or say Not sure.', type: 'TEXT' }
+  }
+
+  if (!has('ayush_vaya')) {
+    return { key: 'ayush_vaya', text: 'What is your age? You can also describe how fit you generally feel at this age.', type: 'TEXT' }
+  }
+
+  if (!has('ayush_satmya')) {
+    return { key: 'ayush_satmya', text: 'What foods or habits are you most used to or comfortable with? (For example, daily tea, spicy or oily food, fasting.)', type: 'TEXT' }
+  }
+
+  if (!has('ayush_sattva')) {
+    return { key: 'ayush_sattva', text: 'How would you describe your sleep, mood, and memory at present?', type: 'TEXT' }
+  }
+
+  if (!has('ayush_vyayama_shakti')) {
+    return { key: 'ayush_vyayama_shakti', text: 'How much physical activity or exertion can you usually manage before feeling tired?', type: 'TEXT' }
+  }
+
+  return null
+}
+
 // Standard follow-ups to ask based on domain
 export function getNextAdaptiveQuestion(
   domain: string,
   answers: AnsweredQuestion[],
   complaint: string,
-  lang?: string | null
+  lang?: string | null,
+  mode?: string | null
 ): AdaptiveQuestion | null {
   // If emergency red flag is found, halt questioning (return null to finish early)
   if (checkEmergencyRedFlags(answers, complaint, lang)) {
@@ -206,6 +292,15 @@ export function getNextAdaptiveQuestion(
       ? 'What helps relieve the joint or muscle pain (e.g., rest, heat, ice, stretching)?'
       : 'What makes the symptom better or provides relief?'
     return { key: 'relieving', text, type: 'TEXT' }
+  }
+
+  // Step 8b: AYURVEDA patient-reported history. This branch runs only in
+  // AYURVEDA-mode sessions and is added on top of the unchanged GENERAL
+  // path. The general core (chief complaint through aggravating/relieving)
+  // is always asked first so the Ayurvedic history has enough context.
+  if (mode === 'AYURVEDA') {
+    const ayurvedaNext = getNextAyurvedaQuestion(domain, answeredKeys)
+    if (ayurvedaNext) return ayurvedaNext
   }
 
   // Step 9: Comprehensive History Taking

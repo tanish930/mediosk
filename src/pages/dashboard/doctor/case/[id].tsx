@@ -5,6 +5,7 @@ import {
   verificationFailureMessage,
   verificationSuccessMessage,
 } from '../../../../lib/verificationFeedback'
+import { groupPatientAyurvedicHistory } from '../../../../lib/ayurvedaReport'
 
 function displayReportValue(value: unknown): string {
   if (value === undefined || value === null || value === '') {
@@ -280,6 +281,43 @@ export default function CaseSheet() {
         </div>
       </section>
 
+      {/* Patient-reported Ayurvedic history (separate from doctor assessment) */}
+      {(() => {
+        const patientAyush = session?.report?.ayush
+        if (!patientAyush) return null
+        const groups = groupPatientAyurvedicHistory(patientAyush)
+        if (groups.length === 0) return null
+        return (
+          <section className="mb-4">
+            <h2 className="font-semibold text-lg border-b pb-1 mb-2">
+              Patient-reported Ayurvedic history
+            </h2>
+            <div className="bg-white p-4 border rounded shadow-sm">
+              <p className="text-sm text-gray-500 mb-3">
+                These items were reported by the patient during the
+                pre-consultation interview. They are patient-reported
+                information and are not an Ayurvedic assessment.
+              </p>
+              {groups.map((g: any) => (
+                <div key={g.id} className="mb-4">
+                  <h3 className="font-semibold border-b">{g.title}</h3>
+                  <div className="space-y-1 mt-1 text-sm">
+                    {g.findings.map((f: any) => (
+                      <div key={f.key}>
+                        <span className="text-gray-600">{f.label}:</span>{' '}
+                        {f.notSure
+                          ? 'Not sure / Not reported'
+                          : displayReportValue(f.value)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )
+      })()}
+
       {/* AI Medical Summaries */}
       <section className="mb-4">
         <h2 className="font-semibold">AI Medical Summaries</h2>
@@ -369,7 +407,9 @@ export default function CaseSheet() {
 
       {/* AYUSH Assessment */}
       <section className="mb-4">
-        <h2 className="font-semibold">AYUSH Assessment</h2>
+        <h2 className="font-semibold">
+          Doctor Ayurvedic Assessment — Reviewed / Verified
+        </h2>
 
         <div className="p-3 border rounded">
           {ayush && !editing && (
@@ -386,6 +426,7 @@ export default function CaseSheet() {
               <div>Vaya: {ayush.vaya}</div>
               <div>Ahara-Vihara: {ayush.aharaVihara}</div>
               <div>Agni: {ayush.agni}</div>
+              <div>Koshtha: {ayush.koshtha}</div>
               <div>Nadi: {ayush.nadi}</div>
               <div>Note: {ayush.note}</div>
 
@@ -567,6 +608,17 @@ export default function CaseSheet() {
                   value={form.agni || ''}
                   onChange={(e) =>
                     setForm({ ...form, agni: e.target.value })
+                  }
+                />
+              </label>
+
+              <label>
+                Koshtha
+                <input
+                  className="w-full border p-1"
+                  value={form.koshtha || ''}
+                  onChange={(e) =>
+                    setForm({ ...form, koshtha: e.target.value })
                   }
                 />
               </label>

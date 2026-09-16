@@ -128,4 +128,34 @@ describe('POST /api/patient/preconsult/start', () => {
     const res = await callHandler('GET')
     expect(res.statusCode).toBe(405)
   })
+
+  test('creates a GENERAL session when no mode is supplied', async () => {
+    const res = await callHandler('POST', { complaint: 'I have a headache for 3 days' })
+
+    expect(res.statusCode).toBe(200)
+    expect(mockPrisma.preConsultationSession.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ mode: 'GENERAL' }),
+      })
+    )
+  })
+
+  test('creates an AYURVEDA session when mode is AYURVEDA', async () => {
+    const res = await callHandler('POST', { complaint: 'I have a headache for 3 days', mode: 'AYURVEDA' })
+
+    expect(res.statusCode).toBe(200)
+    expect(mockPrisma.preConsultationSession.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ mode: 'AYURVEDA' }),
+      })
+    )
+  })
+
+  test('rejects an unsupported mode server-side', async () => {
+    const res = await callHandler('POST', { complaint: 'I have a headache for 3 days', mode: 'UNANI' })
+
+    expect(res.statusCode).toBe(400)
+    expect(mockPrisma.preConsultationSession.create).not.toHaveBeenCalled()
+    expect(mockPrisma.sessionQuestion.create).not.toHaveBeenCalled()
+  })
 })

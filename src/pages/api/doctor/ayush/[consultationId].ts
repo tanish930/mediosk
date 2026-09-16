@@ -16,6 +16,7 @@ const BodySchema = z.object({
   vaya: z.string().optional(),
   aharaVihara: z.string().optional(),
   agni: z.string().optional(),
+  koshtha: z.string().optional(),
   nadi: z.string().optional(),
   note: z.string().optional(),
 })

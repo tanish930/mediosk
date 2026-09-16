@@ -238,6 +238,7 @@ model PreConsultationSession {
   complaint    String
   domain       String?
   language     String                 @default("en")
+  mode         String                 @default("GENERAL")
   status       String                 @default("IN_PROGRESS")
   createdAt    DateTime               @default(now())
   updatedAt    DateTime               @updatedAt
@@ -294,6 +295,7 @@ model PreConsultationReport {
   reviewOfSystems    String?
   otherInfo          Json?
   redFlags           Json?
+  ayush              Json?
   createdAt          DateTime               @default(now())
   session            PreConsultationSession @relation(fields: [sessionId], references: [id])
 }
@@ -315,6 +317,7 @@ model AyushAssessment {
   vaya           String?
   aharaVihara    String?
   agni           String?
+  koshtha        String?
   nadi           String?
   note           String?
   status         VerificationStatus @default(REVIEWED)

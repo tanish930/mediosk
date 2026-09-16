@@ -28,6 +28,8 @@ const QID = '00000000-0000-0000-0000-000000000221'
 
 type StoredRow = { sessionId: string; key: string; order: number }
 let rows: StoredRow[] = []
+let sessOverrides: Record<string, unknown> = {}
+let refetchedQuestions: Array<Record<string, unknown>> | null = null
 
 async function callHandler(handler: (req: NextApiRequest, res: NextApiResponse) => Promise<void> | void, method: string, query: Record<string, unknown> = {}, body?: unknown) {
   const req = createRequest({ method: method as any, query, body: body as any }) as unknown as NextApiRequest
@@ -39,6 +41,8 @@ async function callHandler(handler: (req: NextApiRequest, res: NextApiResponse) 
 beforeEach(() => {
   jest.clearAllMocks()
   rows = []
+  sessOverrides = {}
+  refetchedQuestions = null
   mockGetToken.mockResolvedValue({ id: USER_ID, role: 'PATIENT' })
   mockPrisma.patient.findUnique.mockResolvedValue({ id: PATIENT_ID, userId: USER_ID })
 
@@ -52,12 +56,22 @@ beforeEach(() => {
         id: SID,
         patientId: PATIENT_ID,
         status: 'IN_PROGRESS',
-        domain: 'respiratory',
-        complaint: 'I have a cough',
-        questions: [{ ...chiefQ, answered: true, answer: { id: 'a1', value: 'cough since 2 days' } }],
+        domain: sessOverrides.domain ?? 'respiratory',
+        mode: sessOverrides.mode ?? 'GENERAL',
+        complaint: sessOverrides.complaint ?? 'I have a cough',
+        questions: refetchedQuestions ?? [{ ...chiefQ, answered: true, answer: { id: 'a1', value: 'cough since 2 days' } }],
       })
     }
-    return Promise.resolve({ id: SID, patientId: PATIENT_ID, status: 'IN_PROGRESS', domain: 'respiratory', complaint: 'I have a cough', questions: [chiefQ], report: null })
+    return Promise.resolve({
+      id: SID,
+      patientId: PATIENT_ID,
+      status: 'IN_PROGRESS',
+      domain: sessOverrides.domain ?? 'respiratory',
+      mode: sessOverrides.mode ?? 'GENERAL',
+      complaint: sessOverrides.complaint ?? 'I have a cough',
+      questions: [chiefQ],
+      report: null,
+    })
   })
 
   mockPrisma.sessionQuestion.findUnique.mockResolvedValue({ id: QID, sessionId: SID })
@@ -149,5 +163,80 @@ describe('POST /api/patient/preconsult/session/[id] - adaptive next-question con
 
     expect(res.statusCode).toBe(404)
     expect(mockPrisma.sessionQuestion.createMany).not.toHaveBeenCalled()
+  })
+
+  test('AYURVEDA sessions flow into patient-reported Ayurvedic history after the general core', async () => {
+    sessOverrides = { domain: 'gastrointestinal', mode: 'AYURVEDA', complaint: 'Stomach pain' }
+    const core = [
+      'chief_complaint',
+      'onset',
+      'duration',
+      'location',
+      'severity',
+      'character',
+      'nausea_vomiting',
+      'diarrhea',
+      'associated_symptoms',
+      'aggravating',
+      'relieving',
+    ].map((key, i) => ({
+      id: `${QID}-${i}`,
+      sessionId: SID,
+      key,
+      text: key,
+      type: 'TEXT',
+      answered: true,
+      answer: { id: `a${i}`, value: 'skip' },
+      order: i,
+    }))
+    refetchedQuestions = core
+
+    const res = await callHandler(sessionHandler, 'POST', { id: SID }, { questionId: QID, value: 'pain since 2 days' })
+
+    expect(res.statusCode).toBe(200)
+    expect(mockPrisma.sessionQuestion.createMany).toHaveBeenCalledTimes(1)
+    expect(mockPrisma.sessionQuestion.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skipDuplicates: true,
+        data: [expect.objectContaining({ sessionId: SID, key: 'ayush_nidana' })],
+      })
+    )
+  })
+
+  test('GENERAL sessions never receive Ayurvedic history questions', async () => {
+    sessOverrides = { domain: 'gastrointestinal', mode: 'GENERAL', complaint: 'Stomach pain' }
+    const core = [
+      'chief_complaint',
+      'onset',
+      'duration',
+      'location',
+      'severity',
+      'character',
+      'nausea_vomiting',
+      'diarrhea',
+      'associated_symptoms',
+      'aggravating',
+      'relieving',
+    ].map((key, i) => ({
+      id: `${QID}-${i}`,
+      sessionId: SID,
+      key,
+      text: key,
+      type: 'TEXT',
+      answered: true,
+      answer: { id: `a${i}`, value: 'skip' },
+      order: i,
+    }))
+    refetchedQuestions = core
+
+    const res = await callHandler(sessionHandler, 'POST', { id: SID }, { questionId: QID, value: 'pain since 2 days' })
+
+    expect(res.statusCode).toBe(200)
+    expect(mockPrisma.sessionQuestion.createMany).toHaveBeenCalledTimes(1)
+    expect(mockPrisma.sessionQuestion.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [expect.objectContaining({ key: 'past_medical_history' })],
+      })
+    )
   })
 })

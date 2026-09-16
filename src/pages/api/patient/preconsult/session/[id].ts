@@ -79,7 +79,7 @@ if (!userId) {
         .filter(q => q.answered && q.key && q.answer)
         .map(q => ({ key: q.key!, value: q.answer!.value }))
 
-    const nextQ = getNextAdaptiveQuestion(sess.domain || 'general', answers, sess.complaint, sess.language)
+    const nextQ = getNextAdaptiveQuestion(sess.domain || 'general', answers, sess.complaint, sess.language, sess.mode)
 
     if (nextQ) {
         // Idempotent: (sessionId, key) is unique, so concurrent answers for the
@@ -87,7 +87,7 @@ if (!userId) {
         await prisma.sessionQuestion.createMany({
             data: [{
                 sessionId: id,
-                text: getQuestionText(nextQ.key, sess.language, sess.domain || 'general') ?? nextQ.text,
+                text: getQuestionText(nextQ.key, sess.language, sess.domain || 'general', sess.mode) ?? nextQ.text,
                 type: nextQ.type,
                 key: nextQ.key,
                 order: updatedSess.questions.length
@@ -123,7 +123,7 @@ if (!userId) {
         }
       }
 
-      const mappedData = mapAnswersToReport(answersByKey)
+      const mappedData = mapAnswersToReport(answersByKey, { mode: current.mode })
 
       const redFlagsResult = detectRedFlagFromAnswers(
         current.questions

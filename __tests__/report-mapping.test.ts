@@ -38,3 +38,77 @@ describe('mapAnswersToReport', () => {
       expect(result.location).toBeUndefined();
   });
 });
+
+describe('mapAnswersToReport — AYURVEDA mode', () => {
+  it('writes a versioned patient-reported ayush block in AYURVEDA mode', () => {
+    const answers = new Map<string, unknown>([
+      ['onset', '2 days'],
+      ['ayush_nidana', 'ate stale food'],
+      ['ayush_agni', 'poor appetite'],
+      ['ayush_prakriti', 'my doctor told me I am Pitta'],
+    ]);
+    const result = mapAnswersToReport(answers, { mode: 'AYURVEDA' });
+
+    expect(result.ayush).toEqual({
+      version: 1,
+      mode: 'AYURVEDA',
+      findings: {
+        nidana: 'ate stale food',
+        agni: 'poor appetite',
+        prakriti: { value: 'my doctor told me I am Pitta', source: 'patient-recall' },
+      },
+    });
+  });
+
+  it('records Not sure / Prefer not to answer without inventing values', () => {
+    const answers = new Map<string, unknown>([
+      ['ayush_koshtha', "I don't know"],
+      ['ayush_mutra', 'Prefer not to answer'],
+    ]);
+    const result = mapAnswersToReport(answers, { mode: 'AYURVEDA' });
+
+    expect(result.ayush).toEqual({
+      version: 1,
+      mode: 'AYURVEDA',
+      findings: {
+        koshtha: { notSure: true },
+        mutra: { notSure: true },
+      },
+    });
+  });
+
+  it('never writes ayush for GENERAL or legacy sessions', () => {
+    const answers = new Map<string, unknown>([['ayush_nidana', 'x'], ['onset', 'today']]);
+    expect(mapAnswersToReport(answers, { mode: 'GENERAL' }).ayush).toBeUndefined();
+    expect(mapAnswersToReport(answers).ayush).toBeUndefined();
+  });
+
+  it('includes only the AYURVEDA fields the patient actually answered', () => {
+    const answers = new Map<string, unknown>([
+      ['ayush_nidana', 'x'],
+      ['ayush_mala', 'loose stools'],
+    ]);
+    const result = mapAnswersToReport(answers, { mode: 'AYURVEDA' });
+
+    expect(result.ayush).toEqual({
+      version: 1,
+      mode: 'AYURVEDA',
+      findings: { nidana: 'x', mala: 'loose stools' },
+    });
+  });
+
+  it('never maps doctor-side examination fields into patient findings', () => {
+    const answers = new Map<string, unknown>([
+      ['ayush_nadi', 'wheezy'],
+      ['ayush_sara', 'good'],
+      ['ayush_nidana', 'stale food'],
+    ]);
+    const result = mapAnswersToReport(answers, { mode: 'AYURVEDA' });
+
+    expect(result.ayush).toEqual({
+      version: 1,
+      mode: 'AYURVEDA',
+      findings: { nidana: 'stale food' },
+    });
+  });
+});

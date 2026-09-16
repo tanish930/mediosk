@@ -4,7 +4,7 @@ import { useRouter } from 'next/router'
 import Link from 'next/link'
 import { canUseSpeechRecognition, canUseSpeechSynthesis, speak, createRecognizer } from '../../../lib/voice'
 import { parsePreconsultIntent } from '../../../lib/preconsultFlow'
-import { DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES, isValidLanguage } from '../../../lib/languages'
+import { DEFAULT_LANGUAGE, DEFAULT_CONSULTATION_MODE, CONSULTATION_MODES, SUPPORTED_LANGUAGES, isValidLanguage } from '../../../lib/languages'
 import { sttLocale, readAloudLocale, getQuestionSection, getSectionLabel, getQuestionText } from '../../../lib/multilingualQuestions'
 import { startUiCopy } from '../../../lib/startUiCopy'
 import { DONT_KNOW_VALUE, PREFER_NOT_TO_ANSWER_VALUE } from '../../../lib/responseQualifiers'
@@ -16,6 +16,7 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [complaint, setComplaint] = useState('')
   const [consultationLang, setConsultationLang] = useState<string>(DEFAULT_LANGUAGE)
+  const [consultationMode, setConsultationMode] = useState<string>(DEFAULT_CONSULTATION_MODE)
   const [sessionLanguage, setSessionLanguage] = useState<string | null>(null)
   const [sessionData, setSessionData] = useState<any>(null)
   const [emergencyResult, setEmergencyResult] = useState<any>(null)
@@ -53,7 +54,7 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
       const res = await fetch('/api/patient/preconsult/start', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ complaint, language: consultationLang }),
+        body: JSON.stringify({ complaint, language: consultationLang, mode: consultationMode }),
       })
       const data = await res.json()
       if (!res.ok || !data.sessionId) {
@@ -551,6 +552,53 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
             {t.languageNote}
           </p>
 
+          <fieldset className="mb-2">
+            <legend className="block text-base font-semibold text-slate-700 mb-2">
+              {t.modeQuestion}
+            </legend>
+            <div className="flex flex-col sm:flex-row gap-3">
+              {CONSULTATION_MODES.map(mode => {
+                const selected = consultationMode === mode
+                const label = mode === 'AYURVEDA' ? t.modeAyurvedaLabel : t.modeGeneralLabel
+                const description = mode === 'AYURVEDA' ? t.modeAyurvedaDescription : t.modeGeneralDescription
+                return (
+                  <label
+                    key={mode}
+                    className={`flex items-start gap-3 w-full sm:flex-1 border-2 rounded-xl px-4 py-4 text-lg cursor-pointer select-none transition-all focus-within:ring-2 focus-within:ring-sky-400 focus-within:ring-offset-1 ${
+                      selected
+                        ? 'border-sky-600 bg-sky-50 text-sky-800 font-bold ring-2 ring-sky-400'
+                        : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="consultation-mode"
+                      value={mode}
+                      checked={selected}
+                      onChange={() => setConsultationMode(mode)}
+                      className="sr-only"
+                    />
+                    <span
+                      aria-hidden="true"
+                      className={`mt-1 w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${selected ? 'border-sky-600' : 'border-slate-400'}`}
+                    >
+                      {selected && <span className="w-3 h-3 rounded-full bg-sky-600" />}
+                    </span>
+                    <span>
+                      <span className="block">{label}</span>
+                      <span className="block text-sm font-normal text-slate-500 mt-1">
+                        {description}
+                      </span>
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+          </fieldset>
+          <p className="text-sm text-slate-500 mt-2 mb-4">
+            {t.modeNote}
+          </p>
+
           <div className="flex items-center justify-between gap-3 mb-2">
             <label htmlFor="complaint-input" className="block text-base font-semibold text-slate-700">
               {t.concernLabel}
@@ -762,15 +810,27 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
                 >
                   {answering ? 'Submitting...' : 'Submit Answer'}
                 </button>
-                {questionSection && (questionSection === 'past_history' || questionSection === 'systems_review') && (
-                  <button
-                    onClick={() => answer(q.id, PREFER_NOT_TO_ANSWER_VALUE)}
-                    disabled={answering}
-                    className="mt-2 text-sm font-medium px-5 py-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                    aria-label="Prefer not to answer"
-                  >
-                    Prefer not to answer
-                  </button>
+                {questionSection && (questionSection === 'past_history' || questionSection === 'systems_review' || questionSection === 'ayurveda_history' || questionSection === 'ashtavidha' || questionSection === 'dashavidha') && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(questionSection === 'ayurveda_history' || questionSection === 'ashtavidha' || questionSection === 'dashavidha') && (
+                      <button
+                        onClick={() => answer(q.id, DONT_KNOW_VALUE)}
+                        disabled={answering}
+                        className="text-sm font-medium px-5 py-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                        aria-label="Not sure"
+                      >
+                        Not sure
+                      </button>
+                    )}
+                    <button
+                      onClick={() => answer(q.id, PREFER_NOT_TO_ANSWER_VALUE)}
+                      disabled={answering}
+                      className="text-sm font-medium px-5 py-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                      aria-label="Prefer not to answer"
+                    >
+                      Prefer not to answer
+                    </button>
+                  </div>
                 )}
               </div>
             )}

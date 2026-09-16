@@ -13,13 +13,27 @@ export type QuestionSection =
   | 'symptom_detail'
   | 'systems_review'
   | 'past_history'
+  | 'ayurveda_history'
+  | 'ashtavidha'
+  | 'dashavidha'
 
 type Texts = Record<LanguageCode, string>
+
+// Ayurvedic grouping for patient-reported history questions. TRIVIDHA is part
+// of the taxonomy but is purely observational/doctor-side and must never be
+// attached to a patient-facing question.
+export type AyurvedaGroup =
+  | 'AYURVEDA_HISTORY'
+  | 'TRIVIDHA'
+  | 'ASHTAVIDHA'
+  | 'DASHAVIDHA'
 
 export interface MultilingualQuestionEntry {
   section: QuestionSection
   texts: Texts
   byDomain?: Partial<Record<string, Texts>>
+  byMode?: { AYURVEDA: Texts }
+  ayurvedaGroup?: AyurvedaGroup
 }
 
 export const SECTION_LABELS: Record<QuestionSection, Texts> = {
@@ -27,6 +41,9 @@ export const SECTION_LABELS: Record<QuestionSection, Texts> = {
   symptom_detail: { en: 'Symptom detail', hi: 'लक्षण विवरण', mr: 'लक्षण तपशील' },
   systems_review: { en: 'Systems review', hi: 'प्रणाली जांच', mr: 'प्रणाली तपासणी' },
   past_history: { en: 'Medical history', hi: 'चिकित्सा इतिहास', mr: 'वैद्यकीय इतिहास' },
+  ayurveda_history: { en: 'Ayurvedic history', hi: 'आयुर्वेदिक इतिहास', mr: 'आयुर्वेदिक इतिहास' },
+  ashtavidha: { en: 'Ashtavidha', hi: 'अष्टविधा', mr: 'अष्टविधा' },
+  dashavidha: { en: 'Dashavidha', hi: 'दशविधा', mr: 'दशविधा' },
 }
 
 const weaknessEntry: MultilingualQuestionEntry = {
@@ -66,6 +83,13 @@ export const QUESTION_CATALOG: Record<string, MultilingualQuestionEntry> = {
         en: 'Which joint, muscle, or bone symptom are you experiencing?',
         hi: 'आपको कौन सा जोड़, मांसपेशी या हड्डी से संबंधित लक्षण महसूस हो रहा है?',
         mr: 'तुम्हाला कोणते संधी, स्नायू किंवा हाडाचे लक्षण जाणवत आहे?',
+      },
+    },
+    byMode: {
+      AYURVEDA: {
+        en: 'Please describe your main health concern in a sentence.',
+        hi: 'कृपया अपनी मुख्य स्वास्थ्य चिंता एक वाक्य में बताएं।',
+        mr: 'कृपया तुमची मुख्य आरोग्याची चिंता एका वाक्यात सांगा.',
       },
     },
   },
@@ -485,6 +509,150 @@ export const QUESTION_CATALOG: Record<string, MultilingualQuestionEntry> = {
       mr: 'तुमच्या मुख्य तक्रारीशी संबंधित नसलेली इतर लक्षणे जाणवत आहेत का (उदा., वजन कमी होणे, थकवा, भूक बदलणे)?',
     },
   },
+
+  // ── AYURVEDA patient-reported history ─────────────────────────────
+  // These are asked ONLY in AYURVEDA-mode sessions. They capture
+  // self-reported / self-observable information and prior knowledge. No
+  // categorical clinical option sets are offered: the patient answers in
+  // their own words or chooses Not sure / Prefer not to answer. Clinical
+  // appraisal items (Trividha observation, Sara, Samhanana, Pramana, Nadi,
+  // Jihva, Drika, Shabda, Sparsha, Koshtha classification, etc.) are
+  // doctor-side and never asked here.
+
+  ayush_nidana: {
+    section: 'ayurveda_history',
+    ayurvedaGroup: 'AYURVEDA_HISTORY',
+    texts: {
+      en: 'What do you think may have caused or started this problem? Describe it in your own words as best as you can.',
+      hi: 'आपको क्या लगता है कि इस समस्या का कारण क्या हो सकता है या यह कैसे शुरू हुई? इसे अपने शब्दों में जितना हो सके बताएं।',
+      mr: 'तुम्हाला काय वाटते की या समस्येचे कारण काय असू शकेल किंवा ती कशी सुरू झाली? तुमच्या शब्दांत शक्य तितके सांगा.',
+    },
+  },
+
+  ayush_agni: {
+    section: 'ayurveda_history',
+    ayurvedaGroup: 'AYURVEDA_HISTORY',
+    texts: {
+      en: 'How would you describe your appetite and digestion at present? (For example, hungry as usual, poor appetite, heavy feeling after meals.)',
+      hi: 'इस समय आपकी भूख और पाचन कैसा है? (उदाहरण के लिए, हमेशा की तरह भूख, कम भूख, खाने के बाद भारीपन।)',
+      mr: 'सध्या तुमची भूक आणि पचनशक्ती कशी आहे? (उदाहरणार्थ, नेहमीप्रमाणे भूक, कमी भूक, जेवणानंतर जडपणा.)',
+    },
+  },
+
+  ayush_koshtha: {
+    section: 'ayurveda_history',
+    ayurvedaGroup: 'AYURVEDA_HISTORY',
+    texts: {
+      en: 'How would you describe your usual bowel habit? (For example, regular, once every few days, loose most days.)',
+      hi: 'आपकी आमतौर पर शौच की आदत कैसी रहती है? (उदाहरण के लिए, नियमित, कुछ दिनों में एक बार, अधिकतर दिन पतला।)',
+      mr: 'तुमची नेहमीची शौचाची सवय कशी आहे? (उदाहरणार्थ, नियमित, काही दिवसांनी एकदा, बहुतेक दिवस सैल.)',
+    },
+  },
+
+  ayush_ahara_vihara: {
+    section: 'ayurveda_history',
+    ayurvedaGroup: 'AYURVEDA_HISTORY',
+    texts: {
+      en: 'Describe your usual food, sleep, and daily routine (for example, what you usually eat, your sleep timings, and physical activity).',
+      hi: 'अपने सामान्य भोजन, नींद और दिनचर्या के बारे में बताएं (उदाहरण के लिए, आप आमतौर पर क्या खाते हैं, सोने का समय और शारीरिक गतिविधि)।',
+      mr: 'तुमचे नेहमीचे अन्न, झोप आणि दिनचर्या सांगा (उदाहरणार्थ, तुम्ही सहसा काय खाता, झोपेची वेळ आणि शारीरिक हालचाल).',
+    },
+  },
+
+  ayush_samprapti: {
+    section: 'ayurveda_history',
+    ayurvedaGroup: 'AYURVEDA_HISTORY',
+    texts: {
+      en: 'How has this problem developed since it began? (For example, slowly over days, sudden, coming and going.)',
+      hi: 'शुरू होने के बाद यह समस्या कैसे बढ़ी? (उदाहरण के लिए, दिनों में धीरे-धीरे, अचानक, आना-जाना।)',
+      mr: 'सुरू झाल्यापासून ही समस्या कशी वाढली? (उदाहरणार्थ, दिवसांत हळूहळू, अचानक, येण्या-जाण्या.)',
+    },
+  },
+
+  // Ashtavidha — only the patient-observable elements (mala / mutra) are
+  // asked. Nadi, Jihva, Drika, Shabda and Sparsha are clinical examinations
+  // and remain doctor-side.
+  ayush_mala: {
+    section: 'ashtavidha',
+    ayurvedaGroup: 'ASHTAVIDHA',
+    texts: {
+      en: 'Have you noticed any change in your stool (bowel movements) with this problem? Describe in your own words.',
+      hi: 'क्या आपको इस समस्या के साथ शौच (मल त्याग) में कोई बदलाव दिखा? अपने शब्दों में बताएं।',
+      mr: 'या समस्येसह तुमच्या शौचात (मलविसर्जनात) काही बदल जाणवला का? तुमच्या शब्दांत सांगा.',
+    },
+  },
+
+  ayush_mutra: {
+    section: 'ashtavidha',
+    ayurvedaGroup: 'ASHTAVIDHA',
+    texts: {
+      en: 'Have you noticed any change in your urine with this problem? Describe in your own words.',
+      hi: 'क्या आपको इस समस्या के साथ पेशाब में कोई बदलाव दिखा? अपने शब्दों में बताएं।',
+      mr: 'या समस्येसह तुमच्या लघवीत काही बदल जाणवला का? तुमच्या शब्दांत सांगा.',
+    },
+  },
+
+  // Dashavidha — only recollection of prior knowledge and plain
+  // self-observable facts. No classification is inferred.
+  ayush_prakriti: {
+    section: 'dashavidha',
+    ayurvedaGroup: 'DASHAVIDHA',
+    texts: {
+      en: 'Has an Ayurvedic practitioner ever told you your Prakriti (body constitution)? If yes, describe it in your own words. Otherwise you can say Not sure.',
+      hi: 'क्या किसी आयुर्वेदिक चिकित्सक ने कभी आपकी प्रकृति (शरीर की प्रकृति) बताई है? यदि हां, तो अपने शब्दों में बताएं। अन्यथा आप पता नहीं कह सकते हैं।',
+      mr: 'कधी एखाद्या आयुर्वेदिक वैद्याने तुमची प्रकृती (शरीराची प्रकृती) सांगितली आहे का? असल्यास तुमच्या शब्दांत सांगा. नसल्यास माहीत नाही सांगू शकता.',
+    },
+  },
+
+  ayush_vikriti: {
+    section: 'dashavidha',
+    ayurvedaGroup: 'DASHAVIDHA',
+    texts: {
+      en: 'Have you ever been told about an imbalance of Vata, Pitta, or Kapha in relation to this or any past illness? If yes, describe it in your own words, or say Not sure.',
+      hi: 'क्या आपको कभी बताया गया है कि इस बीमारी या किसी पिछली बीमारी से वात, पित्त या कफ का असंतुलन था? यदि हां, तो अपने शब्दों में बताएं, या पता नहीं कहें।',
+      mr: 'या आजाराशी किंवा मागील आजाराशी संबंधित वात, पित्त किंवा कफ यांचे असंतुलन असल्याचे तुम्हाला कधी सांगितले आहे का? असल्यास तुमच्या शब्दांत सांगा किंवा माहीत नाही म्हणा.',
+    },
+  },
+
+  ayush_vaya: {
+    section: 'dashavidha',
+    ayurvedaGroup: 'DASHAVIDHA',
+    texts: {
+      en: 'What is your age? You can also describe how fit you generally feel at this age.',
+      hi: 'आपकी उम्र कितनी है? आप यह भी बता सकते हैं कि इस उम्र में आप सामान्यतः कितना स्वस्थ महसूस करते हैं।',
+      mr: 'तुमचे वय किती आहे? तुम्ही हेही सांगू शकता की या वयात तुम्ही साधारणपणे किती तंदुरुस्त वाटत.',
+    },
+  },
+
+  ayush_satmya: {
+    section: 'dashavidha',
+    ayurvedaGroup: 'DASHAVIDHA',
+    texts: {
+      en: 'What foods or habits are you most used to or comfortable with? (For example, daily tea, spicy or oily food, fasting.)',
+      hi: 'कौन से भोजन या आदतें आपको सबसे अच्छी तरह से सूट करती हैं या जिनके आप आदी हैं? (उदाहरण के लिए, रोज़ चाय, तीखा या तला भोजन, उपवास।)',
+      mr: 'कोणते अन्न किंवा सवयी तुम्हाला सर्वात सवयीच्या आहेत किंवा आरामदायक वाटतात? (उदाहरणार्थ, रोजचा चहा, तिखट किंवा तळलेले अन्न, उपवास.)',
+    },
+  },
+
+  ayush_sattva: {
+    section: 'dashavidha',
+    ayurvedaGroup: 'DASHAVIDHA',
+    texts: {
+      en: 'How would you describe your sleep, mood, and memory at present?',
+      hi: 'इस समय आपकी नींद, मनोदशा और याददाश्त कैसी है?',
+      mr: 'सध्या तुमची झोप, मनःस्थिती आणि स्मरणशक्ती कशी आहे?',
+    },
+  },
+
+  ayush_vyayama_shakti: {
+    section: 'dashavidha',
+    ayurvedaGroup: 'DASHAVIDHA',
+    texts: {
+      en: 'How much physical activity or exertion can you usually manage before feeling tired?',
+      hi: 'थकान महसूस होने से पहले आप सामान्यतः कितनी शारीरिक गतिविधि या परिश्रम कर सकते हैं?',
+      mr: 'थकवा जाणवण्यापूर्वी तुम्ही सहसा किती शारीरिक हालचाल किंवा श्रम करू शकता?',
+    },
+  },
 }
 
 // Browser locales used for STT (speech-to-text) and read-aloud (text-to-speech).
@@ -522,15 +690,20 @@ export function getQuestionSection(key: string | null | undefined): QuestionSect
 export function getQuestionText(
   key: string | null | undefined,
   lang: string | null | undefined,
-  domain?: string | null
+  domain?: string | null,
+  mode?: string | null
 ): string | null {
   if (!key) return null
   const entry = QUESTION_CATALOG[key]
   if (!entry) return null
 
   const normalized: LanguageCode = isValidLanguage(lang) ? lang : 'en'
-  const variant = domain && entry.byDomain ? entry.byDomain[domain] : undefined
-  const candidate = variant?.[normalized] ?? entry.texts[normalized]
+  const modeVariant =
+    mode === 'AYURVEDA' && entry.byMode?.AYURVEDA
+      ? entry.byMode.AYURVEDA
+      : undefined
+  const domainVariant = domain && entry.byDomain ? entry.byDomain[domain] : undefined
+  const candidate = modeVariant?.[normalized] ?? domainVariant?.[normalized] ?? entry.texts[normalized]
   return candidate ?? entry.texts.en
 }
 

@@ -13,6 +13,12 @@ export interface StartUiCopy {
   intro: string
   languageQuestion: string
   languageNote: string
+  modeQuestion: string
+  modeNote: string
+  modeGeneralLabel: string
+  modeGeneralDescription: string
+  modeAyurvedaLabel: string
+  modeAyurvedaDescription: string
   concernLabel: string
   readAloud: string
   reading: string
@@ -35,6 +41,14 @@ const en: StartUiCopy = {
   languageQuestion: 'In what language would you like to answer these questions?',
   languageNote:
     'The health questions will be shown and read aloud in your chosen language. Your answers are still recorded for your doctor in English.',
+  modeQuestion: 'Which type of consultation would you like?',
+  modeNote:
+    'In an Ayurvedic consultation you may be asked a few extra questions about your digestion, appetite, diet, sleep, and daily routine. Your answers are recorded as patient-reported information for your doctor to review.',
+  modeGeneralLabel: 'General',
+  modeGeneralDescription: 'Standard health questions about this concern.',
+  modeAyurvedaLabel: 'Ayurveda (AYUSH)',
+  modeAyurvedaDescription:
+    'The same questions plus additional Ayurvedic history questions.',
   concernLabel: 'What is your main health concern?',
   readAloud: 'Read Aloud',
   reading: 'Reading...',
@@ -61,6 +75,14 @@ const hi: StartUiCopy = {
   languageQuestion: 'आप इन सवालों का जवाब किस भाषा में देना चाहेंगे?',
   languageNote:
     'स्वास्थ्य प्रश्न आपकी चुनी हुई भाषा में दिखाए और पढ़े जाएंगे। आपके उत्तर आपके डॉक्टर के लिए अंग्रेज़ी में दर्ज किए जाते हैं।',
+  modeQuestion: 'आप किस प्रकार का परामर्श लेना चाहेंगे?',
+  modeNote:
+    'आयुर्वेदिक परामर्श में आपसे पाचन, भूख, आहार, नींद और दिनचर्या के बारे में कुछ अतिरिक्त प्रश्न पूछे जा सकते हैं। आपके उत्तर रोगी द्वारा बताई गई जानकारी के रूप में दर्ज किए जाते हैं, जिनकी समीक्षा आपका डॉक्टर करेगा।',
+  modeGeneralLabel: 'सामान्य',
+  modeGeneralDescription: 'इस समस्या के बारे में मानक स्वास्थ्य प्रश्न।',
+  modeAyurvedaLabel: 'आयुर्वेद (AYUSH)',
+  modeAyurvedaDescription:
+    'वही प्रश्न और अतिरिक्त आयुर्वेदिक इतिहास से संबंधित प्रश्न।',
   concernLabel: 'आपकी मुख्य स्वास्थ्य समस्या क्या है?',
   readAloud: 'ज़ोर से पढ़ें',
   reading: 'पढ़ा जा रहा है...',
@@ -87,6 +109,14 @@ const mr: StartUiCopy = {
   languageQuestion: 'तुम्हाला या प्रश्नांची उत्तरे कोणत्या भाषेत द्यायची आहेत?',
   languageNote:
     'आरोग्याचे प्रश्न तुमच्या निवडलेल्या भाषेत दिसतील आणि मोठ्याने वाचले जातील. तुमची उत्तरे तुमच्या डॉक्टरांसाठी इंग्रजीत नोंदवली जातात.',
+  modeQuestion: 'तुम्हाला कोणत्या प्रकारचा सल्ला घ्यायचा आहे?',
+  modeNote:
+    'आयुर्वेदिक सल्ल्यात तुम्हाला पचन, भूक, आहार, झोप आणि दिनचर्येबद्दल काही अतिरिक्त प्रश्न विचारले जाऊ शकतात. तुमची उत्तरे रुग्णाने सांगितलेली माहिती म्हणून नोंदवली जातात, ज्यांचे पुनरावलोकन तुमचे डॉक्टर करतील.',
+  modeGeneralLabel: 'सामान्य',
+  modeGeneralDescription: 'या तक्रारीबद्दल मानक आरोग्य प्रश्न.',
+  modeAyurvedaLabel: 'आयुर्वेद (AYUSH)',
+  modeAyurvedaDescription:
+    'तेच प्रश्न आणि अतिरिक्त आयुर्वेदिक इतिहासाचे प्रश्न.',
   concernLabel: 'तुमची प्रमुख आरोग्याची तक्रार काय आहे?',
   readAloud: 'मोठ्याने वाचा',
   reading: 'वाचले जात आहे...',
