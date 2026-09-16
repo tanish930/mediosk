@@ -50,6 +50,7 @@ export default function PatientDashboard() {
   const [consultations, setConsultations] = useState<Consultation[]>([])
   const [preConsult, setPreConsult] = useState<PreConsultStatus | null>(null)
   const [loading, setLoading] = useState(true)
+  const [cancellingId, setCancellingId] = useState<string | null>(null)
 
   useEffect(() => {
     Promise.all([
@@ -60,6 +61,29 @@ export default function PatientDashboard() {
       setPreConsult(preData.session || null)
     }).catch(() => {}).finally(() => setLoading(false))
   }, [])
+
+  async function cancelConsultation(consultationId: string) {
+    if (!window.confirm('Cancel this consultation?')) return
+    setCancellingId(consultationId)
+    try {
+      const res = await fetch(`/api/consultations/${consultationId}/cancel`, {
+        method: 'POST',
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        alert(data.error || 'Could not cancel consultation')
+        return
+      }
+      const consData = await fetch('/api/patient/consultations').then(r => r.json())
+      setConsultations(consData.consultations || [])
+    } catch (err) {
+      alert('Could not connect to the server')
+    } finally {
+      setCancellingId(null)
+    }
+  }
+
+  const cancellableStatuses = new Set(['PENDING', 'REQUESTED', 'READY', 'SCHEDULED'])
 
   // The consultation linked to the current pre-consultation session, with a fresh
   // status from the consultations list when available.
@@ -334,6 +358,16 @@ export default function PatientDashboard() {
                         >
                           Join Consultation
                         </Link>
+                      )}
+                      {cancellableStatuses.has(c.status) && (
+                        <button
+                          type="button"
+                          onClick={() => cancelConsultation(c.id)}
+                          disabled={cancellingId === c.id}
+                          className="flex-shrink-0 inline-block bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-5 rounded-lg transition-colors text-center focus:outline-none focus:ring-2 focus:ring-red-300 disabled:opacity-50"
+                        >
+                          {cancellingId === c.id ? 'Cancelling...' : 'Cancel'}
+                        </button>
                       )}
                     </div>
                   )

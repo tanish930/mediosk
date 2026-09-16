@@ -111,9 +111,9 @@ export default async function handler(
       })
     }
 
-    if (consultation.hospitalId && !doctor.hospitalLinks.some((l: any) => l.hospitalId === consultation.hospitalId)) {
+    if (consultation.hospitalId && !doctor.hospitalLinks.some((l: any) => l.hospitalId === consultation.hospitalId && l.status === 'ACTIVE')) {
       return res.status(403).json({
-        error: 'Cannot assign a consultation from a hospital you are not linked to',
+        error: 'Cannot assign a consultation from a hospital you are not actively linked to',
       })
     }
 

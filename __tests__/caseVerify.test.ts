@@ -133,6 +133,59 @@ describe('POST /api/doctor/case/[id]/verify', () => {
     )
   })
 
+  test('doctor verification note is stored with the record', async () => {
+    mockPrisma.doctorVerification.findFirst.mockResolvedValue(null)
+    mockPrisma.doctorVerification.create.mockResolvedValue({
+      id: 'v-note',
+      doctorId: DOCTOR_ID,
+      targetType: 'DOCUMENT',
+      targetId: DOC_ID,
+      status: 'REVIEWED',
+      note: 'Values match the printed lab report',
+    })
+
+    const res = await callHandler(
+      'POST',
+      { id: CONSULTATION_ID },
+      { targetType: 'DOCUMENT', targetId: DOC_ID, status: 'REVIEWED', note: 'Values match the printed lab report' }
+    )
+
+    expect(res.statusCode).toBe(200)
+    expect(mockPrisma.doctorVerification.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          doctorId: DOCTOR_ID,
+          targetType: 'DOCUMENT',
+          targetId: DOC_ID,
+          status: 'REVIEWED',
+          note: 'Values match the printed lab report',
+        }),
+      })
+    )
+    expect(res._getJSONData().verification.note).toBe('Values match the printed lab report')
+  })
+
+  test('existing verification with a note is returned on repeat click', async () => {
+    mockPrisma.doctorVerification.findFirst.mockResolvedValue({
+      id: 'v-note',
+      doctorId: DOCTOR_ID,
+      targetType: 'DOCUMENT',
+      targetId: DOC_ID,
+      status: 'REVIEWED',
+      note: 'Saved earlier',
+    })
+
+    const res = await callHandler(
+      'POST',
+      { id: CONSULTATION_ID },
+      { targetType: 'DOCUMENT', targetId: DOC_ID, status: 'REVIEWED', note: 'Saved earlier' }
+    )
+
+    expect(res.statusCode).toBe(200)
+    expect(mockPrisma.doctorVerification.create).not.toHaveBeenCalled()
+    expect(res._getJSONData().verification.note).toBe('Saved earlier')
+  })
+
   test('unauthenticated request returns 401', async () => {
     mockGetToken.mockResolvedValue(null)
 

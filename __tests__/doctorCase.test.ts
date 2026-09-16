@@ -11,6 +11,7 @@ jest.mock('../src/lib/prisma', () => ({
     medicalSummary: { findMany: jest.fn() },
     medicalDocument: { findMany: jest.fn() },
     medicalTimeline: { findMany: jest.fn() },
+    doctorVerification: { findMany: jest.fn() },
   },
 }))
 
@@ -46,6 +47,7 @@ beforeEach(() => {
   mockPrisma.medicalDocument.findMany.mockResolvedValue([])
   mockPrisma.medicalTimeline.findMany.mockResolvedValue([])
   mockPrisma.consent.findFirst.mockResolvedValue(null)
+  mockPrisma.doctorVerification.findMany.mockResolvedValue([])
 })
 
 function mockConsultation(sessionId: string | null) {
@@ -77,7 +79,8 @@ describe('GET /api/doctor/case/[id]', () => {
         where: expect.objectContaining({ patientId: PATIENT_ID, preConsultationSessionId: SESSION_ID }),
       })
     )
-    expect(body.documents).toEqual([currentDoc])
+    expect(body.documents[0]).toMatchObject({ id: currentDoc.id, title: currentDoc.title })
+    expect(body.documents[0].abnormalities).toEqual([])
   })
 
   test('previous session documents are not included', async () => {
@@ -94,7 +97,8 @@ describe('GET /api/doctor/case/[id]', () => {
         where: expect.objectContaining({ patientId: PATIENT_ID, preConsultationSessionId: OTHER_SESSION_ID }),
       })
     )
-    expect(body.documents).toEqual([previousDoc])
+    expect(body.documents[0]).toMatchObject({ id: previousDoc.id, title: previousDoc.title })
+    expect(body.documents[0].abnormalities).toEqual([])
     expect(body.documents.every((d: any) => d.id !== 'doc-current')).toBe(true)
   })
 
@@ -116,6 +120,65 @@ describe('GET /api/doctor/case/[id]', () => {
     const body = res._getJSONData()
 
     expect(body.consultation?.patient?.documents).toBeUndefined()
+  })
+
+  test('documents carry structured abnormal-investigation statuses', async () => {
+    mockConsultation(SESSION_ID)
+    mockPrisma.medicalDocument.findMany.mockResolvedValue([
+      {
+        id: 'doc-inv',
+        title: 'Recent Labs',
+        extractions: [
+          {
+            id: 'ext-1',
+            extracted: {
+              investigations: [
+                { name: 'Hemoglobin', value: '9.2', unit: 'g/dl', referenceRange: '13-17' },
+                { name: 'Blood Pressure', value: '140/90', unit: 'mmHg', referenceRange: '120/80' },
+                { name: 'WBC', value: '6000', unit: '/mm3', referenceRange: '4000 to 11000' },
+                { name: 'Magnesium', value: '1.8' },
+              ],
+            },
+          },
+        ],
+      },
+    ])
+
+    const res = await callHandler('GET', { id: CONSULTATION_ID })
+    const body = res._getJSONData()
+    const abnormalities = body.documents[0].abnormalities
+
+    expect(res.statusCode).toBe(200)
+    expect(abnormalities).toEqual([
+      expect.objectContaining({ name: 'Hemoglobin', value: '9.2', status: 'LOW' }),
+      expect.objectContaining({ name: 'Blood Pressure', value: '140/90', status: 'UNKNOWN', reason: 'Insufficient numeric value or reference range' }),
+      expect.objectContaining({ name: 'WBC', value: '6000', status: 'NORMAL' }),
+      expect.objectContaining({ name: 'Magnesium', value: '1.8', referenceRange: null, status: 'UNKNOWN' }),
+    ])
+    // Original raw extraction stays intact alongside the structured flags.
+    expect(body.documents[0].extractions[0].extracted.investigations).toHaveLength(4)
+  })
+
+  test('case response includes existing doctor verification records', async () => {
+    mockConsultation(SESSION_ID)
+    mockPrisma.medicalSummary.findMany.mockResolvedValue([{ id: 'summary-1' }])
+    mockPrisma.medicalDocument.findMany.mockResolvedValue([{ id: 'doc-1', extractions: [] }])
+    mockPrisma.doctorVerification.findMany.mockResolvedValue([
+      { id: 'v-1', doctorId: DOCTOR_ID, targetType: 'MEDICAL_SUMMARY', targetId: 'summary-1', status: 'REVIEWED', note: 'Looks consistent' },
+      { id: 'v-2', doctorId: DOCTOR_ID, targetType: 'DOCUMENT', targetId: 'doc-1', status: 'VERIFIED', note: 'Matched original report' },
+    ])
+
+    const res = await callHandler('GET', { id: CONSULTATION_ID })
+    const body = res._getJSONData()
+
+    expect(res.statusCode).toBe(200)
+    expect(mockPrisma.doctorVerification.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ doctorId: DOCTOR_ID, targetId: { in: expect.any(Array) } }),
+      })
+    )
+    expect(body.verifications).toHaveLength(2)
+    expect(body.verifications.map((v: any) => v.note)).toEqual(['Looks consistent', 'Matched original report'])
   })
 
   test('unauthenticated request returns 401', async () => {

@@ -1,14 +1,16 @@
-import { getSession } from 'next-auth/react'
+import { getToken } from 'next-auth/jwt'
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { prisma } from '../../../lib/prisma'
 
 export default async function handler(req:NextApiRequest,res:NextApiResponse){
-  const session = await getSession({ req })
-  if (!session) return res.status(401).json({ error: 'Unauthorized' })
-  const role = (session as any).user?.role
+  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET })
+  if (!token) return res.status(401).json({ error: 'Unauthorized' })
+  const role = token.role as string
+  const userId = token.id as string
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' })
   if (role !== 'HOSPITAL') return res.status(403).json({ error: 'Forbidden' })
 
-  const hospital = await prisma.hospital.findUnique({ where: { userId: (session as any).user.id } })
+  const hospital = await prisma.hospital.findUnique({ where: { userId } })
   if (!hospital) return res.status(404).json({ error: 'Hospital not found' })
 
   // Linked doctors' active consultations plus the hospital's unassigned intake pool.

@@ -30,7 +30,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(404).json({ error: 'Doctor profile not found' })
   }
 
-  const linkedHospitalIds = doctor.hospitalLinks.map((l: any) => l.hospitalId)
+  const linkedHospitalIds = doctor.hospitalLinks.filter((l: any) => l.status === 'ACTIVE').map((l: any) => l.hospitalId)
 
   const consultations = await prisma.consultation.findMany({
     where: {

@@ -5,6 +5,10 @@ jest.mock('next-auth/react', () => ({
   getSession: jest.fn(),
 }))
 
+jest.mock('next-auth/jwt', () => ({
+  getToken: jest.fn(),
+}))
+
 jest.mock('../src/lib/prisma', () => ({
   prisma: {
     doctor: { findUnique: jest.fn(), update: jest.fn() },
@@ -15,11 +19,13 @@ jest.mock('../src/lib/prisma', () => ({
 }))
 
 import { getSession } from 'next-auth/react'
+import { getToken } from 'next-auth/jwt'
 import { prisma } from '../src/lib/prisma'
 import doctorProfileHandler from '../src/pages/api/doctor/profile'
 import hospitalProfileHandler from '../src/pages/api/hospital/profile'
 
 const mockGetSession = getSession as jest.Mock
+const mockGetToken = getToken as jest.Mock
 const mockDoctor = prisma.doctor as any
 const mockHospital = prisma.hospital as any
 const mockUser = prisma.user as any
@@ -119,7 +125,7 @@ describe('PUT /api/doctor/profile', () => {
 
 describe('GET /api/hospital/profile', () => {
   test('still works for the HOSPITAL role and does not leak the user hash', async () => {
-    mockGetSession.mockResolvedValue({ user: { id: 'u2', role: 'HOSPITAL' } })
+    mockGetToken.mockResolvedValue({ id: 'u2', role: 'HOSPITAL' })
     mockDoctor.findUnique.mockReset()
     mockHospital.findUnique.mockResolvedValue({
       id: 'h1',
@@ -138,7 +144,7 @@ describe('GET /api/hospital/profile', () => {
   })
 
   test('denies non-hospital roles', async () => {
-    mockGetSession.mockResolvedValue({ user: { id: 'u1', role: 'DOCTOR' } })
+    mockGetToken.mockResolvedValue({ id: 'u1', role: 'DOCTOR' })
     const res = await callHandler(hospitalProfileHandler, 'GET')
     expect(res.statusCode).toBe(403)
   })

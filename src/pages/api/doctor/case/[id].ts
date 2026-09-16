@@ -1,6 +1,7 @@
 import { getToken } from 'next-auth/jwt'
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { prisma } from '../../../../lib/prisma'
+import { assessInvestigations } from '../../../../lib/abnormal'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse){
   const token = await getToken({
@@ -39,7 +40,29 @@ if (role !== 'DOCTOR') {
   const documents = consultation.sessionId
     ? await prisma.medicalDocument.findMany({ where: { patientId: consultation.patientId, preConsultationSessionId: consultation.sessionId }, include: { extractions: true } })
     : []
+
+  // Enrich each document with structured abnormal-investigation flags so the
+  // case sheet can show doctor-friendly value/range/status without inventing
+  // data. Original extracted values and reference ranges are preserved.
+  const documentsWithAbnormalities = documents.map((doc) => {
+    const investigations = (doc.extractions ?? [])
+      .filter((e: any) => e && typeof e.extracted === 'object' && e.extracted !== null)
+      .flatMap((e: any) => (e.extracted as any)?.investigations ?? [])
+    return { ...doc, abnormalities: assessInvestigations(investigations) }
+  })
+
   const timelines = await prisma.medicalTimeline.findMany({ where: { patientId: consultation.patientId }, orderBy: { date: 'desc' } })
 
-  return res.json({ consultation, summaries, documents, timelines })
+  // Existing verification records for this doctor on the displayed targets so
+  // the case sheet can reflect current status and any saved notes.
+  const verificationTargetIds = [
+    consultation.session?.report?.id,
+    ...summaries.map((s) => s.id),
+    ...documents.map((d) => d.id),
+  ].filter((t): t is string => Boolean(t))
+  const verifications = verificationTargetIds.length
+    ? await prisma.doctorVerification.findMany({ where: { doctorId: doctor.id, targetId: { in: verificationTargetIds } }, orderBy: { createdAt: 'asc' } })
+    : []
+
+  return res.json({ consultation, summaries, documents: documentsWithAbnormalities, timelines, verifications })
 }

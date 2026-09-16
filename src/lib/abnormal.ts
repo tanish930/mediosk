@@ -73,9 +73,9 @@ export function assessAbnormalValue(
     return { status: 'NORMAL', reason: 'Value is within reference limit' }
   }
 
-  // Standard range: 12-16, 12 – 16, 3.5 to 5.5
+  // Standard range: 12-16, 12 ï¿½ 16, 3.5 to 5.5
   const rangeMatch = range.match(
-    /(-?\d*\.?\d+)\s*(?:-|–|—|to)\s*(-?\d*\.?\d+)/
+    /(-?\d*\.?\d+)\s*(?:-|ï¿½|ï¿½|to)\s*(-?\d*\.?\d+)/
   )
 
   if (!rangeMatch) {
@@ -113,4 +113,46 @@ export function assessAbnormalValue(
     status: 'NORMAL',
     reason: `Value is within reference range ${lower}-${upper}`
   }
+}
+
+export type InvestigationAssessmentInput = {
+  name?: string | null
+  value?: string | null
+  unit?: string | null
+  referenceRange?: string | null
+}
+
+export type InvestigationAssessment = {
+  name: string
+  value: string | null
+  unit: string | null
+  referenceRange: string | null
+  status: AbnormalStatus
+  reason?: string
+}
+
+// Assess a single extracted investigation against its reference range.
+// The original value, unit and reference range are preserved as-is so the
+// doctor can judge the result; the status is only added as decision support.
+export function assessInvestigation(
+  inv: InvestigationAssessmentInput
+): InvestigationAssessment {
+  const result = assessAbnormalValue(inv.value ?? undefined, inv.referenceRange ?? undefined)
+  return {
+    name: inv.name ?? 'Investigation',
+    value: inv.value ?? null,
+    unit: inv.unit ?? null,
+    referenceRange: inv.referenceRange ?? null,
+    status: result.status,
+    reason: result.reason,
+  }
+}
+
+export function assessInvestigations(
+  investigations: InvestigationAssessmentInput[] | null | undefined
+): InvestigationAssessment[] {
+  if (!investigations || !Array.isArray(investigations)) return []
+  return investigations
+    .filter((inv) => inv && typeof inv === 'object')
+    .map(assessInvestigation)
 }

@@ -69,7 +69,7 @@ describe('assign.ts - DOCTOR self assignment (unchanged behavior)', () => {
     mockPrisma.doctor.findUnique.mockResolvedValue({
       id: DOCTOR_ID,
       userId: DOCTOR_USER_ID,
-      hospitalLinks: [{ hospitalId: HOSPITAL_ID }],
+      hospitalLinks: [{ hospitalId: HOSPITAL_ID, status: 'ACTIVE' }],
     })
     mockPrisma.consultation.update.mockResolvedValue(
       requestedConsultation({ doctorId: DOCTOR_ID, status: 'READY' })
@@ -86,6 +86,23 @@ describe('assign.ts - DOCTOR self assignment (unchanged behavior)', () => {
         data: expect.objectContaining({ doctorId: DOCTOR_ID, status: 'READY' }),
       })
     )
+  })
+
+  test('doctor cannot self-assign when their hospital link is still PENDING', async () => {
+    mockPrisma.consultation.findUnique.mockResolvedValue(requestedConsultation())
+    mockPrisma.doctor.findUnique.mockResolvedValue({
+      id: DOCTOR_ID,
+      userId: DOCTOR_USER_ID,
+      hospitalLinks: [{ hospitalId: HOSPITAL_ID, status: 'PENDING' }],
+    })
+
+    const result = await callHandler(
+      { consultationId: CONSULT_ID },
+      { id: DOCTOR_USER_ID, role: 'DOCTOR' }
+    )
+
+    expect(result.status).toBe(403)
+    expect(mockPrisma.consultation.update).not.toHaveBeenCalled()
   })
 
   test('doctor cannot assign a consultation from a hospital they are not linked to', async () => {

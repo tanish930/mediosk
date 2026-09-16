@@ -50,6 +50,14 @@ function messageClass(type: 'success' | 'error'): string {
     : 'text-red-700 bg-red-50 border-red-200'
 }
 
+function doctorStatusClass(status: string): string {
+  switch (status) {
+    case 'ACTIVE': return 'bg-green-100 text-green-800'
+    case 'SUSPENDED': return 'bg-red-100 text-red-800'
+    default: return 'bg-amber-100 text-amber-800'
+  }
+}
+
 function HospitalProfile({ onSaved }: { onSaved?: (name: string) => void }) {
   const [loading, setLoading] = useState(true)
   const [name, setName] = useState('')
@@ -280,20 +288,65 @@ function HospitalProfile({ onSaved }: { onSaved?: (name: string) => void }) {
 function HospitalDoctors() {
   const [links, setLinks] = useState<any[]>([])
   const [doctorId, setDoctorId] = useState('')
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   useEffect(() => { load() }, [])
   async function load() { const r = await fetch('/api/hospital/doctors'); const j = await r.json(); setLinks(j.doctors || []) }
-  async function add() { await fetch('/api/hospital/doctors', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ doctorId }) }); setDoctorId(''); await load() }
+  async function add() {
+    const r = await fetch('/api/hospital/doctors', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ doctorId }) })
+    const j = await r.json().catch(() => null)
+    if (!r.ok) { setMessage({ type: 'error', text: j?.error || 'Could not add doctor' }); return }
+    setDoctorId('')
+    setMessage({ type: 'success', text: 'Doctor linked to the hospital.' })
+    await load()
+  }
+  async function setStatus(linkId: string, action: 'activate' | 'deactivate') {
+    setBusyId(linkId)
+    setMessage(null)
+    try {
+      const r = await fetch(`/api/hospital/doctors/${linkId}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action }) })
+      const j = await r.json().catch(() => null)
+      if (!r.ok) { setMessage({ type: 'error', text: j?.error || 'Could not update doctor status' }); return }
+      setMessage({ type: 'success', text: action === 'activate' ? 'Doctor activated. They can now receive assignments.' : 'Doctor deactivated. They can no longer receive assignments.' })
+      await load()
+    } catch {
+      setMessage({ type: 'error', text: 'Could not update doctor status' })
+    } finally {
+      setBusyId(null)
+    }
+  }
   return (
     <div>
       <h2 className="font-semibold mb-2">Doctors</h2>
+      {message && (
+        <div className={`mb-2 p-3 border rounded text-sm ${messageClass(message.type)}`} role="status" aria-live="polite">{message.text}</div>
+      )}
       <div className="mb-3">
         <input className="border p-2 mr-2" placeholder="Doctor ID" value={doctorId} onChange={e => setDoctorId(e.target.value)} />
         <button onClick={add} className="px-3 py-2 bg-sky-600 text-white rounded">Add Doctor</button>
+        <p className="text-xs text-slate-500 mt-1">
+          New doctors start as PENDING. Activate a doctor before they can receive consultation assignments.
+        </p>
       </div>
       <div className="space-y-2">
         {links.map(l => (
           <div key={l.id} className="p-3 border rounded">
-            <div>{l.doctor.user?.name || l.doctor.user?.email} — {l.status}</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium">{l.doctor.user?.name || l.doctor.user?.email}</span>
+              <span className={`text-xs px-2 py-0.5 rounded-full ${doctorStatusClass(l.status)}`}>
+                {l.status}
+              </span>
+              {l.status === 'PENDING' && (
+                <button onClick={() => setStatus(l.id, 'activate')} disabled={busyId === l.id} className="px-2 py-1 text-xs bg-green-600 text-white rounded disabled:opacity-50">
+                  {busyId === l.id ? 'Updating...' : 'Activate'}
+                </button>
+              )}
+              {l.status === 'ACTIVE' && (
+                <button onClick={() => setStatus(l.id, 'deactivate')} disabled={busyId === l.id} className="px-2 py-1 text-xs bg-amber-500 text-white rounded disabled:opacity-50">
+                  {busyId === l.id ? 'Updating...' : 'Deactivate'}
+                </button>
+              )}
+            </div>
             <div className="text-sm">Verifications: {l.doctor.verifications?.length || 0}</div>
           </div>
         ))}
@@ -306,6 +359,9 @@ function HospitalQueue() {
   const [consultations, setConsultations] = useState<any[]>([])
   const [doctors, setDoctors] = useState<any[]>([])
   const [assignments, setAssignments] = useState<Record<string, string>>({})
+  const [scheduleDrafts, setScheduleDrafts] = useState<Record<string, string>>({})
+  const [scheduleBusyId, setScheduleBusyId] = useState<string | null>(null)
+  const [cancelBusyId, setCancelBusyId] = useState<string | null>(null)
 
   useEffect(() => {
     load()
@@ -317,6 +373,22 @@ function HospitalQueue() {
   async function load() { const r = await fetch('/api/hospital/queue'); const j = await r.json(); setConsultations(j.consultations || []) }
   async function loadDoctors() { const r = await fetch('/api/hospital/doctors'); const j = await r.json(); setDoctors(j.doctors || []) }
   async function assign(consult: any, doctorId: string) { await fetch('/api/consultations/assign', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ consultationId: consult.id, doctorId }) }); await load() }
+  async function schedule(consultationId: string) {
+    const scheduledAt = scheduleDrafts[consultationId]
+    if (!scheduledAt) return
+    setScheduleBusyId(consultationId)
+    await fetch(`/api/consultations/${consultationId}/schedule`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scheduledAt: new Date(scheduledAt).toISOString() }) })
+    setScheduleDrafts(prev => ({ ...prev, [consultationId]: '' }))
+    setScheduleBusyId(null)
+    await load()
+  }
+  async function cancel(consultationId: string) {
+    if (!window.confirm('Cancel this consultation?')) return
+    setCancelBusyId(consultationId)
+    await fetch(`/api/consultations/${consultationId}/cancel`, { method: 'POST' })
+    setCancelBusyId(null)
+    await load()
+  }
   return (
     <div>
       <h2 className="font-semibold mb-2">Patient / Consultation Queue</h2>
@@ -325,6 +397,32 @@ function HospitalQueue() {
           <div key={c.id} className="p-3 border rounded">
             <div className="font-semibold">{c.status} — {c.patient?.user?.name || c.patient?.user?.email}</div>
             <div className="text-sm">Complaint: {c.session?.report?.chiefComplaint || c.session?.complaint}</div>
+            {c.scheduledAt && (
+              <div className="text-sm text-slate-600">
+                Scheduled: {new Date(c.scheduledAt).toLocaleString()}
+              </div>
+            )}
+            {c.doctorId && (c.status === 'READY' || c.status === 'SCHEDULED') && (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <input
+                  type="datetime-local"
+                  aria-label="Schedule date and time"
+                  className="border p-1 rounded text-sm"
+                  value={scheduleDrafts[c.id] || ''}
+                  onChange={(e) => setScheduleDrafts(prev => ({ ...prev, [c.id]: e.target.value }))}
+                />
+                <button onClick={() => schedule(c.id)} disabled={scheduleBusyId === c.id || !scheduleDrafts[c.id]} className="px-3 py-2 bg-sky-600 text-white rounded disabled:opacity-50">
+                  {scheduleBusyId === c.id ? 'Scheduling...' : 'Schedule'}
+                </button>
+              </div>
+            )}
+            {(c.status === 'REQUESTED' || c.status === 'READY' || c.status === 'SCHEDULED') && (
+              <div className="mt-2">
+                <button onClick={() => cancel(c.id)} disabled={cancelBusyId === c.id} className="px-3 py-2 bg-red-600 text-white rounded disabled:opacity-50">
+                  {cancelBusyId === c.id ? 'Cancelling...' : 'Cancel'}
+                </button>
+              </div>
+            )}
             {c.status === 'REQUESTED' && <div className="mt-2">
               <select
                 className="border p-1 mr-2"

@@ -6,6 +6,9 @@ import AccountNav from '../../../components/AccountNav'
 export default function DoctorDashboard() {
   const [consultations, setConsultations] = useState<any[]>([])
   const [assigningId, setAssigningId] = useState<string | null>(null)
+  const [schedulingId, setSchedulingId] = useState<string | null>(null)
+  const [cancellingId, setCancellingId] = useState<string | null>(null)
+  const [scheduleDrafts, setScheduleDrafts] = useState<Record<string, string>>({})
   const [error, setError] = useState('')
 
   async function loadQueue() {
@@ -60,6 +63,64 @@ export default function DoctorDashboard() {
     }
   }
 
+  async function scheduleConsultation(consultationId: string) {
+    const scheduledAt = scheduleDrafts[consultationId]
+    if (!scheduledAt) return
+    setSchedulingId(consultationId)
+    setError('')
+
+    try {
+      const res = await fetch(`/api/consultations/${consultationId}/schedule`, {
+        method: 'PATCH',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ scheduledAt: new Date(scheduledAt).toISOString() }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error || 'Could not schedule consultation')
+        return
+      }
+
+      setScheduleDrafts((prev) => ({ ...prev, [consultationId]: '' }))
+      await loadQueue()
+    } catch (err) {
+      console.error(err)
+      setError('Could not connect to the server')
+    } finally {
+      setSchedulingId(null)
+    }
+  }
+
+  async function cancelConsultation(consultationId: string) {
+    if (!window.confirm('Cancel this consultation?')) return
+    setCancellingId(consultationId)
+    setError('')
+
+    try {
+      const res = await fetch(`/api/consultations/${consultationId}/cancel`, {
+        method: 'POST',
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error || 'Could not cancel consultation')
+        return
+      }
+
+      await loadQueue()
+    } catch (err) {
+      console.error(err)
+      setError('Could not connect to the server')
+    } finally {
+      setCancellingId(null)
+    }
+  }
+
   return (
     <>
       <AccountNav profileHref="/dashboard/doctor/profile" dashboardHref="/dashboard/doctor" />
@@ -111,9 +172,41 @@ export default function DoctorDashboard() {
                       {c.doctor.user.name || c.doctor.user.email}
                     </div>
                   )}
+
+                  {c.scheduledAt && (
+                    <div className="text-sm text-gray-600">
+                      Scheduled:{' '}
+                      {new Date(c.scheduledAt).toLocaleString()}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {c.doctorId && (c.status === 'READY' || c.status === 'SCHEDULED') && (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="datetime-local"
+                        aria-label="Schedule date and time"
+                        value={scheduleDrafts[c.id] || ''}
+                        onChange={(e) =>
+                          setScheduleDrafts((prev) => ({
+                            ...prev,
+                            [c.id]: e.target.value,
+                          }))
+                        }
+                        className="border p-2 rounded text-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => scheduleConsultation(c.id)}
+                        disabled={schedulingId === c.id || !scheduleDrafts[c.id]}
+                        className="px-3 py-2 bg-sky-600 text-white rounded disabled:opacity-50"
+                      >
+                        {schedulingId === c.id ? 'Scheduling...' : 'Schedule'}
+                      </button>
+                    </div>
+                  )}
+
                   {isRequested && (
                     <button
                       type="button"
@@ -146,6 +239,20 @@ export default function DoctorDashboard() {
                       Join Consultation
                     </Link>
                   )}
+
+                  {c.doctorId &&
+                    (c.status === 'REQUESTED' ||
+                      c.status === 'READY' ||
+                      c.status === 'SCHEDULED') && (
+                      <button
+                        type="button"
+                        onClick={() => cancelConsultation(c.id)}
+                        disabled={cancellingId === c.id}
+                        className="px-3 py-2 bg-red-600 text-white rounded disabled:opacity-50"
+                      >
+                        {cancellingId === c.id ? 'Cancelling...' : 'Cancel'}
+                      </button>
+                    )}
                 </div>
               </div>
             )

@@ -6,6 +6,7 @@ import {
   verificationSuccessMessage,
 } from '../../../../lib/verificationFeedback'
 import { groupPatientAyurvedicHistory } from '../../../../lib/ayurvedaReport'
+import { timelineSourceLabel } from '../../../../lib/timeline'
 
 function displayReportValue(value: unknown): string {
   if (value === undefined || value === null || value === '') {
@@ -23,6 +24,71 @@ function displayReportValue(value: unknown): string {
   }
 }
 
+function abnormalBadgeClass(status: string): string {
+  switch (status) {
+    case 'HIGH': return 'bg-red-100 text-red-800'
+    case 'LOW': return 'bg-amber-100 text-amber-800'
+    case 'NORMAL': return 'bg-green-100 text-green-800'
+    default: return 'bg-slate-100 text-slate-600'
+  }
+}
+
+function VerificationControls({
+  targetType,
+  targetId,
+  verifications,
+  notes,
+  onNoteChange,
+  onVerify,
+}: {
+  targetType: string
+  targetId: string
+  verifications: any[]
+  notes: Record<string, string>
+  onNoteChange: (key: string, value: string) => void
+  onVerify: (targetType: string, targetId: string, status: string, note?: string) => void
+}) {
+  const latest = [...(verifications || [])]
+    .reverse()
+    .find((v: any) => v.targetType === targetType && v.targetId === targetId)
+  const key = `${targetType}:${targetId}`
+
+  return (
+    <div className="mt-2 space-y-1">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <button
+          type="button"
+          onClick={() => onVerify(targetType, targetId, 'REVIEWED', notes[key] || undefined)}
+          className="px-3 py-1 bg-yellow-500 text-white rounded text-xs"
+        >
+          Mark Reviewed
+        </button>
+        <button
+          type="button"
+          onClick={() => onVerify(targetType, targetId, 'VERIFIED', notes[key] || undefined)}
+          className="px-3 py-1 bg-green-600 text-white rounded text-xs"
+        >
+          Mark Verified
+        </button>
+        {latest && (
+          <span className="text-xs text-gray-600">
+            Status: <span className="font-medium">{latest.status}</span>
+            {latest.note ? ` — ${latest.note}` : ''}
+          </span>
+        )}
+      </div>
+      <input
+        type="text"
+        aria-label={`Verification note for ${targetType}`}
+        placeholder="Verification note (optional)"
+        className="border p-1 text-sm rounded w-full max-w-xs"
+        value={notes[key] || ''}
+        onChange={(e) => onNoteChange(key, e.target.value)}
+      />
+    </div>
+  )
+}
+
 export default function CaseSheet() {
   const router = useRouter()
   const { id } = router.query
@@ -31,12 +97,17 @@ export default function CaseSheet() {
   const [ayush, setAyush] = useState<any>(null)
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<any>({})
+  const [verifications, setVerifications] = useState<any[]>([])
+  const [notes, setNotes] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (id) {
       fetch(`/api/doctor/case/${id}`)
         .then((r) => r.json())
-        .then((d) => setData(d))
+        .then((d) => {
+          setData(d)
+          setVerifications(d.verifications || [])
+        })
     }
   }, [id])
 
@@ -55,10 +126,30 @@ export default function CaseSheet() {
 
   const verifyingRef = useRef<Set<string>>(new Set())
 
+  async function refreshCase() {
+    try {
+      const res = await fetch(`/api/doctor/case/${id}`)
+      if (res.ok) {
+        const d = await res.json()
+        setData(d)
+        setVerifications(d.verifications || [])
+      }
+    } catch {
+      // keep the current data if the refresh fails
+    }
+  }
+
+  function latestVerification(targetType: string, targetId: string) {
+    return [...(verifications || [])]
+      .reverse()
+      .find((v: any) => v.targetType === targetType && v.targetId === targetId)
+  }
+
   async function verify(
     targetType: string,
     targetId: string,
-    status: string
+    status: string,
+    note?: string
   ) {
     const key = `${targetType}:${targetId}:${status}`
     if (verifyingRef.current.has(key)) return
@@ -68,7 +159,7 @@ export default function CaseSheet() {
       const res = await fetch(`/api/doctor/case/${id}/verify`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ targetType, targetId, status }),
+        body: JSON.stringify({ targetType, targetId, status, note }),
       })
       const body = await res.json().catch(() => null)
 
@@ -76,6 +167,13 @@ export default function CaseSheet() {
         alert(verificationFailureMessage((body as any)?.error))
         return
       }
+
+      setNotes((prev) => {
+        const next = { ...prev }
+        delete next[`${targetType}:${targetId}`]
+        return next
+      })
+      await refreshCase()
 
       alert(verificationSuccessMessage(targetType, status))
     } catch (err) {
@@ -245,31 +343,16 @@ export default function CaseSheet() {
 
               {/* Verification */}
               <div className="md:col-span-2 pt-2 border-t mt-2">
-                <button
-                  onClick={() =>
-                    verify(
-                      'PRECONSULTATION_REPORT',
-                      session.report.id,
-                      'REVIEWED'
-                    )
+                <VerificationControls
+                  targetType="PRECONSULTATION_REPORT"
+                  targetId={session.report.id}
+                  verifications={verifications}
+                  notes={notes}
+                  onNoteChange={(key, value) =>
+                    setNotes((prev) => ({ ...prev, [key]: value }))
                   }
-                  className="px-3 py-1 bg-yellow-500 text-white rounded text-xs"
-                >
-                  Mark Reviewed
-                </button>
-
-                <button
-                  onClick={() =>
-                    verify(
-                      'PRECONSULTATION_REPORT',
-                      session.report.id,
-                      'VERIFIED'
-                    )
-                  }
-                  className="ml-2 px-3 py-1 bg-green-600 text-white rounded text-xs"
-                >
-                  Mark Verified
-                </button>
+                  onVerify={(t, tid, s, note) => verify(t, tid, s, note)}
+                />
               </div>
             </div>
           ) : (
@@ -333,14 +416,16 @@ export default function CaseSheet() {
                 Patient Summary: {s.patientSummary}
               </div>
 
-              <button
-                onClick={() =>
-                  verify('MEDICAL_SUMMARY', s.id, 'REVIEWED')
+              <VerificationControls
+                targetType="MEDICAL_SUMMARY"
+                targetId={s.id}
+                verifications={verifications}
+                notes={notes}
+                onNoteChange={(key, value) =>
+                  setNotes((prev) => ({ ...prev, [key]: value }))
                 }
-                className="mt-2 px-3 py-2 bg-yellow-500 text-white rounded"
-              >
-                Mark Reviewed
-              </button>
+                onVerify={(t, tid, status, note) => verify(t, tid, status, note)}
+              />
             </div>
           ))}
         </div>
@@ -353,11 +438,22 @@ export default function CaseSheet() {
         <div className="space-y-2">
           {data.timelines?.map((t: any) => (
             <div key={t.id} className="p-2 border rounded">
-              <div className="font-semibold">
-                {t.title} — {t.entryType}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold">
+                  {t.title} — {t.entryType}
+                </span>
+                <span
+                  className={`text-xs px-2 py-0.5 rounded-full ${
+                    t.sourceDocumentId
+                      ? 'bg-sky-100 text-sky-700'
+                      : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  {timelineSourceLabel(t)}
+                </span>
               </div>
 
-              <div className="text-sm">{t.details}</div>
+              <div className="text-sm mt-0.5">{t.details}</div>
             </div>
           ))}
         </div>
@@ -388,18 +484,55 @@ export default function CaseSheet() {
 
               <div className="mt-2">Extractions:</div>
 
+              {(d.abnormalities || []).length > 0 && (
+                <div className="mt-1 p-2 bg-slate-50 border rounded">
+                  <div className="font-semibold text-sm">
+                    Investigation Levels (AI/OCR extracted)
+                  </div>
+                  <div className="space-y-1 mt-1 text-sm">
+                    {d.abnormalities.map((inv: any, i: number) => (
+                      <div key={i} className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium">{inv.name}</span>
+                        <span>
+                          {inv.value}
+                          {inv.unit ? ` ${inv.unit}` : ''}
+                        </span>
+                        {inv.referenceRange && (
+                          <span className="text-gray-500">
+                            ({inv.referenceRange})
+                          </span>
+                        )}
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-xs font-medium ${abnormalBadgeClass(
+                            inv.status
+                          )}`}
+                        >
+                          {inv.status}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-2">
+                    AI-generated level: flag only. Verify the value against the
+                    original document before relying on it.
+                  </p>
+                </div>
+              )}
+
               <pre className="bg-gray-50 p-2 rounded mt-1">
                 {JSON.stringify(d.extractions || [], null, 2)}
               </pre>
 
-              <button
-                onClick={() =>
-                  verify('DOCUMENT', d.id, 'REVIEWED')
+              <VerificationControls
+                targetType="DOCUMENT"
+                targetId={d.id}
+                verifications={verifications}
+                notes={notes}
+                onNoteChange={(key, value) =>
+                  setNotes((prev) => ({ ...prev, [key]: value }))
                 }
-                className="mt-2 px-3 py-2 bg-yellow-500 text-white rounded"
-              >
-                Mark Document Reviewed
-              </button>
+                onVerify={(t, tid, status, note) => verify(t, tid, status, note)}
+              />
             </div>
           ))}
         </div>
