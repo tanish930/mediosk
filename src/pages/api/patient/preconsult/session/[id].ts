@@ -2,8 +2,11 @@ import { getToken } from 'next-auth/jwt'
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { prisma } from '../../../../../lib/prisma'
 import { z } from 'zod'
+import type { Prisma } from '@prisma/client'
 import { getNextAdaptiveQuestion } from '../../../../../lib/adaptiveQuestioning'
+import { getQuestionText } from '../../../../../lib/multilingualQuestions'
 import { mapAnswersToReport } from '../../../../../lib/reportMapping'
+import { detectRedFlagFromAnswers } from '../../../../../lib/redFlags'
 
 const AnswerSchema = z.object({ questionId: z.string().uuid(), value: z.any() })
 
@@ -36,7 +39,15 @@ if (!userId) {
   if (req.method === 'GET') {
     const total = sess.questions.length
     const answered = sess.questions.filter(q=>q.answered).length
-    return res.json({ session: sess, progress: { total, answered } })
+    const answers = sess.questions
+      .filter(q => q.answered && q.key && q.answer)
+      .map(q => ({ key: q.key!, value: q.answer!.value }))
+    const redFlag = detectRedFlagFromAnswers(answers, sess.complaint, sess.language)
+    return res.json({
+      session: sess,
+      progress: { total, answered },
+      redFlag: redFlag.severity === 'NORMAL' ? null : redFlag,
+    })
   }
 
   if (req.method === 'POST') {
@@ -68,7 +79,7 @@ if (!userId) {
         .filter(q => q.answered && q.key && q.answer)
         .map(q => ({ key: q.key!, value: q.answer!.value }))
 
-    const nextQ = getNextAdaptiveQuestion(sess.domain || 'general', answers, sess.complaint)
+    const nextQ = getNextAdaptiveQuestion(sess.domain || 'general', answers, sess.complaint, sess.language)
 
     if (nextQ) {
         // Idempotent: (sessionId, key) is unique, so concurrent answers for the
@@ -76,7 +87,7 @@ if (!userId) {
         await prisma.sessionQuestion.createMany({
             data: [{
                 sessionId: id,
-                text: nextQ.text,
+                text: getQuestionText(nextQ.key, sess.language, sess.domain || 'general') ?? nextQ.text,
                 type: nextQ.type,
                 key: nextQ.key,
                 order: updatedSess.questions.length
@@ -85,7 +96,9 @@ if (!userId) {
         })
     }
 
-    return res.json({ ok: true })
+    const redFlag = detectRedFlagFromAnswers(answers, sess.complaint, sess.language)
+
+    return res.json({ ok: true, redFlag: redFlag.severity === 'NORMAL' ? null : redFlag })
   }
 
   if (req.method === 'PUT') {
@@ -112,10 +125,22 @@ if (!userId) {
 
       const mappedData = mapAnswersToReport(answersByKey)
 
+      const redFlagsResult = detectRedFlagFromAnswers(
+        current.questions
+          .filter(q => q.answered && q.key && q.answer)
+          .map(q => ({ key: q.key!, value: q.answer!.value })),
+        current.complaint,
+        current.language
+      )
+
       const report = await tx.preConsultationReport.create({
         data: {
           sessionId: current.id,
           chiefComplaint: current.complaint,
+          redFlags:
+            redFlagsResult.severity === 'NORMAL'
+              ? undefined
+              : (redFlagsResult.matches as Prisma.InputJsonValue),
           ...mappedData
         },
       })

@@ -3,18 +3,20 @@ import { NextApiRequest, NextApiResponse } from 'next'
 import { z } from 'zod'
 import { prisma } from '../../../lib/prisma'
 import { authOptions } from '../auth/[...nextauth]'
+import { detectRedFlag } from '../../../lib/redFlags'
 
 const BodySchema = z.object({ sessionId: z.string(), createAlert: z.boolean().optional(), hospitalId: z.string().optional() })
 
-function computeSeverityFromReport(report:any, complaint?:string){
-  const text = `${report.chiefComplaint||''} ${report.onsetDuration||''} ${complaint||''}`.toLowerCase()
-  // Deterministic red-flag rules (safety-critical):
-  const emergencyPatterns = ['chest pain','shortness of breath','breathless','unconscious','loss of consciousness','severe bleeding','heavy bleeding','severe head injury','sudden weakness','sudden numbness','slurred speech']
-  for (const p of emergencyPatterns) if (text.includes(p)) return 'EMERGENCY'
-
-  // Urgent patterns
-  const urgentPatterns = ['high fever','very high fever','inability to breathe','fainting','near fainting','severe abdominal pain']
-  for (const p of urgentPatterns) if (text.includes(p)) return 'URGENT'
+function computeSeverityFromReport(report: any, complaint?: string, lang?: string | null) {
+  // Deterministic shared multilingual red-flag scan over the report content.
+  const text = [
+    report.chiefComplaint || '',
+    report.onsetDuration || '',
+    report.character || '',
+    complaint || '',
+  ].join(' ')
+  const detection = detectRedFlag(text, lang)
+  if (detection.severity !== 'NORMAL') return detection.severity
 
   // If report contains explicit redFlags JSON array with entries
   try{ if (Array.isArray(report.redFlags) && report.redFlags.length>0) return 'EMERGENCY' }catch(e){}
@@ -43,7 +45,7 @@ export default async function handler(req:NextApiRequest,res:NextApiResponse){
     if (!patient || patient.id !== sess.patientId) return res.status(403).json({ error: 'forbidden' })
   }
 
-  const severity = computeSeverityFromReport(sess.report||{}, sess.complaint)
+  const severity = computeSeverityFromReport(sess.report||{}, sess.complaint, sess.language)
 
   let alert = null
   if (createAlert && (severity === 'URGENT' || severity === 'EMERGENCY')){

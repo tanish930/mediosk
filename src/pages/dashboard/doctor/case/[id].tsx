@@ -126,6 +126,21 @@ export default function CaseSheet() {
             Primary Complaint: {session?.complaint}
           </div>
 
+          {session?.report?.redFlags && Array.isArray(session.report.redFlags) && session.report.redFlags.length > 0 && (
+            <div className="p-4 mb-4 bg-red-50 border-2 border-red-300 rounded" role="alert">
+              <h3 className="font-bold text-red-800 mb-1">{'\u26A0\uFE0F'} Red Flags Detected</h3>
+              <p className="text-red-700 text-sm mb-2">
+                The patient&apos;s pre-consultation answers matched these rule-based red-flag keywords.
+                Discuss and verify them with the patient before continuing.
+              </p>
+              <ul className="list-disc list-inside text-sm text-red-800">
+                {session.report.redFlags.map((f: any, i: number) => (
+                  <li key={i}>{String(f)}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {session?.report ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
               {/* HPI */}

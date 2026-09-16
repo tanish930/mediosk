@@ -94,8 +94,8 @@ describe('POST /api/patient/preconsult/session/[id] - adaptive next-question con
 
     expect(r1.statusCode).toBe(200)
     expect(r2.statusCode).toBe(200)
-    expect(r1._getJSONData()).toEqual({ ok: true })
-    expect(r2._getJSONData()).toEqual({ ok: true })
+    expect(r1._getJSONData()).toEqual({ ok: true, redFlag: null })
+    expect(r2._getJSONData()).toEqual({ ok: true, redFlag: null })
 
     expect(mockPrisma.sessionQuestion.createMany).toHaveBeenCalledTimes(2)
     for (const call of mockPrisma.sessionQuestion.createMany.mock.calls) {

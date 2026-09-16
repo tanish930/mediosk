@@ -1,4 +1,5 @@
 import { QuestionType } from '@prisma/client'
+import { checkEmergencyRedFlags } from './redFlags'
 
 export interface AnsweredQuestion {
   key: string
@@ -11,64 +12,17 @@ export interface AdaptiveQuestion {
   type: QuestionType
 }
 
-// Check if any answer indicates an emergency (Red Flags)
-export function checkEmergencyRedFlags(answers: AnsweredQuestion[], complaint: string): boolean {
-  const combinedText = [
-    complaint,
-    ...answers.map(a => typeof a.value === 'string' ? a.value : '')
-  ].join(' ').toLowerCase()
-
-  const emergencyPatterns = [
-    'chest pain',
-    'shortness of breath',
-    'breathless',
-    'unconscious',
-    'loss of consciousness',
-    'severe bleeding',
-    'heavy bleeding',
-    'severe head injury',
-    'sudden weakness',
-    'sudden numbness',
-    'slurred speech'
-  ]
-
-  // Check for negations
-  const negationPatterns = ['no ', 'not ', 'none ', 'without ', 'never ', "don't ", "doesn't "]
-  
-  for (const p of emergencyPatterns) {
-    if (combinedText.includes(p)) {
-      // Check if it's negated
-      let isNegated = false
-      for (const neg of negationPatterns) {
-        if (combinedText.includes(neg + p)) {
-          isNegated = true
-          break
-        }
-      }
-      if (!isNegated) return true
-    }
-  }
-
-  // Also check if severity is extremely high
-  const severityAnswer = answers.find(a => a.key === 'severity')
-  if (severityAnswer) {
-    const sevNum = Number(severityAnswer.value)
-    if (!Number.isNaN(sevNum) && sevNum >= 9) {
-      return true
-    }
-  }
-
-  return false
-}
+export { checkEmergencyRedFlags }
 
 // Standard follow-ups to ask based on domain
 export function getNextAdaptiveQuestion(
   domain: string,
   answers: AnsweredQuestion[],
-  complaint: string
+  complaint: string,
+  lang?: string | null
 ): AdaptiveQuestion | null {
   // If emergency red flag is found, halt questioning (return null to finish early)
-  if (checkEmergencyRedFlags(answers, complaint)) {
+  if (checkEmergencyRedFlags(answers, complaint, lang)) {
     return null
   }
 

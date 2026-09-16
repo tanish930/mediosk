@@ -237,6 +237,7 @@ model PreConsultationSession {
   patientId    String
   complaint    String
   domain       String?
+  language     String                 @default("en")
   status       String                 @default("IN_PROGRESS")
   createdAt    DateTime               @default(now())
   updatedAt    DateTime               @updatedAt

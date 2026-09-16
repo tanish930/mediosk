@@ -4,6 +4,10 @@ import { useRouter } from 'next/router'
 import Link from 'next/link'
 import { canUseSpeechRecognition, canUseSpeechSynthesis, speak, createRecognizer } from '../../../lib/voice'
 import { parsePreconsultIntent } from '../../../lib/preconsultFlow'
+import { DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES, isValidLanguage } from '../../../lib/languages'
+import { sttLocale, readAloudLocale, getQuestionSection, getSectionLabel, getQuestionText } from '../../../lib/multilingualQuestions'
+import { startUiCopy } from '../../../lib/startUiCopy'
+import { DONT_KNOW_VALUE, PREFER_NOT_TO_ANSWER_VALUE } from '../../../lib/responseQualifiers'
 
 type Stage = 'start' | 'questions' | 'documents' | 'review' | 'submitted'
 
@@ -11,6 +15,8 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
   const router = useRouter()
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [complaint, setComplaint] = useState('')
+  const [consultationLang, setConsultationLang] = useState<string>(DEFAULT_LANGUAGE)
+  const [sessionLanguage, setSessionLanguage] = useState<string | null>(null)
   const [sessionData, setSessionData] = useState<any>(null)
   const [emergencyResult, setEmergencyResult] = useState<any>(null)
   const [hospitals, setHospitals] = useState<any[] | null>(null)
@@ -27,7 +33,10 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
   const [transcript, setTranscript] = useState('')
   const [transcriptFinal, setTranscriptFinal] = useState<string | null>(null)
   const [voiceError, setVoiceError] = useState<string | null>(null)
+  const [inlineRedFlag, setInlineRedFlag] = useState<any>(null)
   const recognizerRef = useRef<any>(null)
+  const answerInputRef = useRef<any>(null)
+  const userChangedLangRef = useRef(false)
   const [answering, setAnswering] = useState(false)
   const answeringRef = useRef(false)
   const [intakeSkipped, setIntakeSkipped] = useState(false)
@@ -44,15 +53,12 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
       const res = await fetch('/api/patient/preconsult/start', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ complaint }),
+        body: JSON.stringify({ complaint, language: consultationLang }),
       })
       const data = await res.json()
       if (!res.ok || !data.sessionId) {
-        if (data.error === 'ACTIVE_CONSULTATION_IN_PROGRESS') {
-          setStartError('A consultation with your doctor is already in progress. Finish or leave it before starting a new consultation.')
-        } else {
-          setStartError(data.error || 'Could not start pre-consultation. Please try again.')
-        }
+        const t = startUiCopy(consultationLang)
+        setStartError(data.error === 'ACTIVE_CONSULTATION_IN_PROGRESS' ? t.errorActiveConsultation : t.errorStartFailed)
         return
       }
       await loadSession(data.sessionId)
@@ -67,7 +73,7 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
         { shallow: true }
       )
     } catch {
-      setStartError('Could not connect to the server. Please check your connection and try again.')
+      setStartError(startUiCopy(consultationLang).errorConnectFailed)
     } finally {
       setLoading(false)
     }
@@ -75,10 +81,17 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
 
   const [startError, setStartError] = useState<string | null>(null)
 
+  function applySessionData(data: any) {
+    setSessionData(data)
+    const lang = data?.session?.language
+    if (isValidLanguage(lang)) setSessionLanguage(lang)
+    setInlineRedFlag(data?.redFlag && data.redFlag.severity !== 'NORMAL' ? data.redFlag : null)
+  }
+
   async function loadSession(id: string) {
     const res = await fetch(`/api/patient/preconsult/session/${id}`)
     const data = await res.json()
-    setSessionData(data)
+    applySessionData(data)
   }
 
   const [resumeLoading, setResumeLoading] = useState(true)
@@ -97,17 +110,17 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
           if (cancelled) return
           if (d && d.session) {
             setSessionId(initialSessionId)
-            setSessionData(d)
+            applySessionData(d)
             setSessionLoadError(null)
           } else {
             setSessionId(null)
-            setSessionLoadError('We could not load that consultation. You can start a new consultation instead.')
+            setSessionLoadError(startUiCopy(consultationLang).errorSessionLoad)
           }
         })
         .catch(() => {
           if (cancelled) return
           setSessionId(null)
-          setSessionLoadError('We could not load that consultation. You can start a new consultation instead.')
+          setSessionLoadError(startUiCopy(consultationLang).errorSessionLoad)
         })
         .finally(() => { if (!cancelled) setResumeLoading(false) })
       return () => { cancelled = true }
@@ -142,6 +155,23 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
     return () => {
       if (recognizerRef.current && recognizerRef.current.isSupported) recognizerRef.current.stop()
     }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    // Pre-select the patient's preferred clinical language (from their profile)
+    // so a new consultation defaults to the language they consult in. A
+    // language the patient already chose in the form always wins over this
+    // preselect, so an in-flight profile fetch can never revert their choice.
+    fetch('/api/patient/profile')
+      .then(r => r.json().catch(() => null))
+      .then(d => {
+        if (cancelled || userChangedLangRef.current) return
+        const lang = d?.patient?.preferredLanguage
+        if (isValidLanguage(lang)) setConsultationLang(lang)
+      })
+      .catch(() => { /* keep the default language */ })
+    return () => { cancelled = true }
   }, [])
 
   async function loadIntakeDocs() {
@@ -253,14 +283,17 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
   function playQuestion(text: string) {
     if (!canUseSpeechSynthesis()) return
     setSpeaking(true)
-    speak(text).finally(() => setSpeaking(false))
+    const lang = sessionLanguage || consultationLang
+    speak(text, readAloudLocale(lang)).finally(() => setSpeaking(false))
   }
 
   function startListening() {
     if (!canUseSpeechRecognition()) return
     if (recognizerRef.current && recognizerRef.current.isListening()) return
     setVoiceError(null)
+    const lang = sessionLanguage || consultationLang
     const r = createRecognizer({
+      lang: sttLocale(lang),
       onResult: (t, isFinal) => {
         if (recognizerRef.current !== r) return
         setTranscript(t)
@@ -414,6 +447,8 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
   const submitted = submittedConsultation || sessionData?.session?.consultation
   const hasReport = !!sessionData?.session?.report
   const progress = sessionData?.progress || { total: 0, answered: 0 }
+  const questionLang = sessionLanguage || consultationLang
+  const questionSection = q ? getQuestionSection(q.key) : null
 
   const stage: Stage = (() => {
     if (submitted) return 'submitted'
@@ -424,6 +459,11 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
   })()
 
   const stageIndex = { start: 0, questions: 1, documents: 2, review: 3, submitted: 4 }[stage]
+
+  // Active consultation-language UI copy for the Start stage. Because this is
+  // derived from `consultationLang` state, the whole stage re-renders in the
+  // selected language the moment the patient picks a card.
+  const t = startUiCopy(consultationLang)
 
   // ─── Render ──────────────────────────────────────────────────────
   return (
@@ -460,10 +500,9 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
       {/* ── STAGE: Start ─────────────────────────────────────────── */}
       {stage === 'start' && (
         <div>
-          <h1 className="text-3xl font-bold text-slate-900 mb-2">Start New Consultation</h1>
+          <h1 className="text-3xl font-bold text-slate-900 mb-2">{t.pageTitle}</h1>
           <p className="text-lg text-slate-600 mb-6">
-            Start a brand-new visit by telling us what is bothering you. This helps your doctor prepare.
-            Your previous consultations stay safe and unchanged.
+            {t.intro}
           </p>
 
           {sessionLoadError && (
@@ -472,20 +511,72 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
             </div>
           )}
 
-          <label htmlFor="complaint-input" className="block text-base font-semibold text-slate-700 mb-2">
-            What is your main health concern?
-          </label>
+          <fieldset className="mb-2">
+            <legend className="block text-base font-semibold text-slate-700 mb-2">
+              {t.languageQuestion}
+            </legend>
+            <div className="flex flex-col sm:flex-row gap-3">
+              {SUPPORTED_LANGUAGES.map(l => {
+                const selected = consultationLang === l.code
+                return (
+                  <label
+                    key={l.code}
+                    className={`flex items-center justify-center gap-3 w-full sm:flex-1 border-2 rounded-xl px-4 py-4 text-lg cursor-pointer select-none transition-all focus-within:ring-2 focus-within:ring-sky-400 focus-within:ring-offset-1 ${
+                      selected
+                        ? 'border-sky-600 bg-sky-50 text-sky-800 font-bold ring-2 ring-sky-400'
+                        : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="consultation-lang"
+                      value={l.code}
+                      checked={selected}
+                      onChange={() => { userChangedLangRef.current = true; setConsultationLang(l.code) }}
+                      className="sr-only"
+                    />
+                    <span
+                      aria-hidden="true"
+                      className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${selected ? 'border-sky-600' : 'border-slate-400'}`}
+                    >
+                      {selected && <span className="w-3 h-3 rounded-full bg-sky-600" />}
+                    </span>
+                    <span>{t.languageNames[isValidLanguage(l.code) ? l.code : 'en']}</span>
+                  </label>
+                )
+              })}
+            </div>
+          </fieldset>
+          <p className="text-sm text-slate-500 mt-2 mb-4">
+            {t.languageNote}
+          </p>
+
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <label htmlFor="complaint-input" className="block text-base font-semibold text-slate-700">
+              {t.concernLabel}
+            </label>
+            {canUseSpeechSynthesis() && (
+              <button
+                onClick={() => playQuestion(getQuestionText('chief_complaint', consultationLang) ?? '')}
+                disabled={speaking}
+                className="text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50 transition-colors focus:outline-none focus:ring-2 focus:ring-sky-300 whitespace-nowrap"
+                aria-label={t.readFirstQuestionAria}
+              >
+                {speaking ? t.reading : t.readAloud}
+              </button>
+            )}
+          </div>
           <textarea
             id="complaint-input"
             className="w-full border-2 border-slate-300 p-4 rounded-xl text-lg resize-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200 outline-none transition-colors"
             rows={4}
             value={complaint}
             onChange={e => setComplaint(e.target.value)}
-            placeholder="For example: I have had a headache for 3 days"
+            placeholder={t.complaintPlaceholder}
             aria-describedby="complaint-hint"
           />
           <p id="complaint-hint" className="text-sm text-slate-500 mt-1 mb-4">
-            Write as much or as little as you can. You can describe pain, symptoms, or anything unusual.
+            {t.complaintHint}
           </p>
 
           {startError && (
@@ -498,15 +589,15 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
             disabled={loading || !complaint.trim()}
             onClick={start}
             className="w-full sm:w-auto bg-sky-600 hover:bg-sky-700 text-white text-lg font-semibold py-4 px-8 rounded-xl shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-4 focus:ring-sky-300"
-            aria-label="Start New Consultation"
+            aria-label={t.pageTitle}
           >
             {loading ? (
               <span className="flex items-center justify-center gap-2">
                 <span className="inline-block animate-spin rounded-full h-5 w-5 border-2 border-white/30 border-t-white" />
-                Starting...
+                {t.starting}
               </span>
             ) : (
-              'Begin New Visit'
+              t.beginButton
             )}
           </button>
         </div>
@@ -518,6 +609,33 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
           <h1 className="text-2xl font-bold text-slate-900 mb-1">Health Questions</h1>
           <p className="text-slate-500 mb-6">Answer each question so we can understand your condition better.</p>
 
+          {inlineRedFlag && (
+            <div
+              className={`p-4 rounded-xl border-2 mb-4 ${inlineRedFlag.severity === 'EMERGENCY' ? 'bg-red-50 border-red-300' : 'bg-amber-50 border-amber-300'}`}
+              role="alert"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className={`text-lg font-bold mb-1 ${inlineRedFlag.severity === 'EMERGENCY' ? 'text-red-800' : 'text-amber-800'}`}>
+                    {'\u26A0\uFE0F'} {inlineRedFlag.severity === 'EMERGENCY' ? 'Emergency Detected' : 'Urgent Attention Needed'}
+                  </h2>
+                  <p className={`text-base ${inlineRedFlag.severity === 'EMERGENCY' ? 'text-red-700' : 'text-amber-700'}`}>
+                    {inlineRedFlag.severity === 'EMERGENCY'
+                      ? 'Your answers suggest this may be a medical emergency. Please seek immediate medical attention. You can finish the questions and we can alert a nearby hospital.'
+                      : 'Your answers suggest this may need prompt attention. Please consider reaching a care provider soon.'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setInlineRedFlag(null)}
+                  className="text-sm font-medium text-slate-500 hover:text-slate-700 underline whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-slate-300 rounded"
+                  aria-label="Dismiss emergency warning"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+
           {answerError && (
             <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 mb-4" role="alert">
               {answerError}
@@ -527,10 +645,27 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
 
           {/* Current question card */}
           <div className="bg-white border-2 border-slate-200 rounded-2xl p-6 shadow-sm mb-6">
-            <div className="text-xs font-semibold uppercase tracking-wider text-sky-600 mb-2">
-              Question {progress.answered + 1}
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <div className="text-xs font-semibold uppercase tracking-wider text-sky-600">
+                  Question {progress.answered + 1}
+                </div>
+                {questionSection && (
+                  <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">
+                    {getSectionLabel(questionSection, questionLang)}
+                  </span>
+                )}
+              </div>
+              {isValidLanguage(questionLang) && SUPPORTED_LANGUAGES.find(l => l.code === questionLang) && (
+                <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                  {SUPPORTED_LANGUAGES.find(l => l.code === questionLang)!.label}
+                </span>
+              )}
             </div>
             <h2 className="text-xl font-semibold text-slate-900 mb-5">{q.text}</h2>
+            <p className="text-sm text-slate-500 mb-4">
+              You can speak your answer, type it, or choose a quick option below.
+            </p>
 
             {/* Voice controls */}
             <div className="flex flex-wrap items-center gap-3 mb-5 pb-4 border-b border-slate-100">
@@ -544,14 +679,14 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
                 <span className="text-sm font-medium text-slate-600">Voice mode</span>
               </label>
 
-              {voiceMode && canUseSpeechSynthesis() && (
+              {canUseSpeechSynthesis() && (
                 <button
                   onClick={() => playQuestion(q.text)}
                   disabled={speaking}
                   className="text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50 transition-colors focus:outline-none focus:ring-2 focus:ring-sky-300"
-                  aria-label="Read question aloud"
+                  aria-label={t.readFirstQuestionAria}
                 >
-                  {speaking ? 'Reading...' : '🔊 Read Aloud'}
+                  {speaking ? t.reading : t.readAloud}
                 </button>
               )}
 
@@ -581,7 +716,22 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
 
             {voiceError && (
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm mb-4" role="alert">
-                {voiceError}
+                <div className="flex items-center justify-between gap-3">
+                  <div>{voiceError}</div>
+                  {(q.type === 'TEXT' || q.type === 'NUMBER') && (
+                    <button
+                      onClick={() => {
+                        stopVoiceRecognition()
+                        setVoiceError(null)
+                        if (answerInputRef.current) answerInputRef.current.focus()
+                      }}
+                      className="text-sm font-semibold text-amber-800 underline whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-amber-300 rounded"
+                      aria-label="Use typing instead of voice"
+                    >
+                      Type instead
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
@@ -591,6 +741,7 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
                 <label htmlFor="answer-text" className="sr-only">Your answer</label>
                 <textarea
                   id="answer-text"
+                  ref={answerInputRef}
                   className="w-full border-2 border-slate-300 p-4 rounded-xl text-lg resize-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200 outline-none transition-colors"
                   rows={3}
                   value={transcriptFinal ?? transcript}
@@ -611,6 +762,16 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
                 >
                   {answering ? 'Submitting...' : 'Submit Answer'}
                 </button>
+                {questionSection && (questionSection === 'past_history' || questionSection === 'systems_review') && (
+                  <button
+                    onClick={() => answer(q.id, PREFER_NOT_TO_ANSWER_VALUE)}
+                    disabled={answering}
+                    className="mt-2 text-sm font-medium px-5 py-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                    aria-label="Prefer not to answer"
+                  >
+                    Prefer not to answer
+                  </button>
+                )}
               </div>
             )}
 
@@ -620,6 +781,7 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
                 <label htmlFor="answer-number" className="sr-only">Your answer (number)</label>
                 <input
                   id="answer-number"
+                  ref={answerInputRef}
                   type="number"
                   className="w-full border-2 border-slate-300 p-4 rounded-xl text-2xl text-center font-semibold focus:border-sky-500 focus:ring-2 focus:ring-sky-200 outline-none transition-colors"
                   value={transcriptFinal ?? transcript}
@@ -662,6 +824,16 @@ export default function PreConsultationPage({ newFlow = false, initialSessionId 
                     aria-label="No"
                   >
                     No
+                  </button>
+                </div>
+                <div className="mt-3 text-center">
+                  <button
+                    onClick={() => answer(q.id, DONT_KNOW_VALUE)}
+                    disabled={answering}
+                    className="inline-block text-sm font-medium px-5 py-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                    aria-label="I don't know"
+                  >
+                    I don&apos;t know
                   </button>
                 </div>
 

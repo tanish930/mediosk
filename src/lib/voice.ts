@@ -10,6 +10,7 @@ type RecognizerCallbacks = {
   onResult: (transcript: string, isFinal: boolean) => void
   onEnd?: () => void
   onError?: (info: RecognitionErrorInfo) => void
+  lang?: string
 }
 
 export type RecognizerHandle = {
@@ -96,7 +97,7 @@ export function createRecognizer(callbacks: RecognizerCallbacks): RecognizerHand
   }
 
   const recog = new SpeechRecognition()
-  recog.lang = 'en-IN'
+  recog.lang = callbacks.lang && callbacks.lang.trim() ? callbacks.lang.trim() : 'en-IN'
   recog.interimResults = true
   recog.maxAlternatives = 1
 
