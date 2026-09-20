@@ -11,6 +11,8 @@ jest.mock('../src/lib/prisma', () => ({
     consultation: { findUnique: jest.fn() },
     consent: { findFirst: jest.fn() },
     ayushAssessment: { findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
+    ayushDoshaAssessment: { findUnique: jest.fn(), upsert: jest.fn() },
+    ayushFormulationSuggestion: { findMany: jest.fn(), updateMany: jest.fn(), upsert: jest.fn() },
   },
 }))
 
@@ -46,6 +48,31 @@ beforeEach(() => {
     patientId: PATIENT_ID,
   })
   mockPrisma.consent.findFirst.mockResolvedValue(null)
+  // Decision-support regeneration defaults (exercise the deterministic engine).
+  mockPrisma.ayushDoshaAssessment.upsert.mockImplementation((args: any) =>
+    Promise.resolve({
+      id: 'dosha-1',
+      ayushAssessmentId: args.create?.ayushAssessmentId ?? 'ayush-1',
+      consultationId: CONSULTATION_ID,
+      patientId: PATIENT_ID,
+      doctorId: DOCTOR_ID,
+      result: args.create?.result ?? {},
+      inputSnapshot: args.create?.inputSnapshot ?? {},
+    })
+  )
+  mockPrisma.ayushFormulationSuggestion.findMany.mockResolvedValue([])
+  mockPrisma.ayushFormulationSuggestion.updateMany.mockResolvedValue({ count: 0 })
+  mockPrisma.ayushFormulationSuggestion.upsert.mockImplementation((args: any) =>
+    Promise.resolve({
+      id: `sug-${args.create?.formularyId ?? ''}`,
+      consultationId: CONSULTATION_ID,
+      patientId: PATIENT_ID,
+      formularyId: args.create?.formularyId ?? '',
+      status: 'SUGGESTED',
+      active: true,
+    })
+  )
+  mockPrisma.ayushDoshaAssessment.findUnique.mockResolvedValue(null)
 })
 
 describe('GET /api/doctor/ayush/[consultationId]', () => {

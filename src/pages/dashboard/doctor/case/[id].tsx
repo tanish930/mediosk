@@ -1,6 +1,6 @@
 import { useRouter } from 'next/router'
 import { getSession } from 'next-auth/react'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   verificationFailureMessage,
   verificationSuccessMessage,
@@ -99,6 +99,9 @@ export default function CaseSheet() {
   const [form, setForm] = useState<any>({})
   const [verifications, setVerifications] = useState<any[]>([])
   const [notes, setNotes] = useState<Record<string, string>>({})
+  const [doshaAssessment, setDoshaAssessment] = useState<any>(null)
+  const [suggestions, setSuggestions] = useState<any[]>([])
+  const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (id) {
@@ -111,16 +114,48 @@ export default function CaseSheet() {
     }
   }, [id])
 
-  useEffect(() => {
-    if (id) {
-      fetch(`/api/doctor/ayush/${id}`)
-        .then((r) => r.json())
-        .then((d) => {
-          setAyush(d.ayush)
-          setForm(d.ayush || {})
-        })
+  const refreshAyush = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/doctor/ayush/${id}`)
+      if (res.ok) {
+        const d = await res.json()
+        setAyush(d.ayush)
+        setForm(d.ayush || {})
+        setDoshaAssessment(d.doshaAssessment || null)
+        setSuggestions(d.suggestions || [])
+      }
+    } catch {
+      // keep the current data if the refresh fails
     }
   }, [id])
+
+  useEffect(() => {
+    if (id) {
+      refreshAyush()
+    }
+  }, [id, refreshAyush])
+
+  function setNadi(key: string, value: unknown) {
+    const current =
+      typeof form.nadiData === 'object' && form.nadiData ? form.nadiData : {}
+    setForm({ ...form, nadiData: { ...current, [key]: value } })
+  }
+
+  function cleanedNadiData(): unknown {
+    const nd =
+      typeof form.nadiData === 'object' && form.nadiData ? form.nadiData : {}
+    const out: Record<string, unknown> = {}
+    if (nd.rateBpm !== undefined && nd.rateBpm !== null && nd.rateBpm !== '') {
+      out.rateBpm = Number(nd.rateBpm)
+    }
+    for (const k of ['rhythm', 'gati', 'quality', 'note']) {
+      const v = nd[k]
+      if (v !== undefined && v !== null && String(v).trim() !== '') {
+        out[k] = String(v).trim()
+      }
+    }
+    return Object.keys(out).length > 0 ? out : undefined
+  }
 
   const caseData = data?.consultation
 
@@ -183,6 +218,37 @@ export default function CaseSheet() {
     }
   }
 
+  async function reviewSuggestion(s: any, status: string) {
+    const note = reviewNotes[s.id] || undefined
+    try {
+      const res = await fetch(`/api/doctor/ayush/formulation/${s.id}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status, note }),
+      })
+      const body = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        alert((body as any)?.error || 'Could not update the formulation suggestion')
+        return
+      }
+
+      setReviewNotes((prev) => {
+        const next = { ...prev }
+        delete next[s.id]
+        return next
+      })
+      await refreshAyush()
+      alert(
+        status === 'APPROVED'
+          ? 'Formulation suggestion approved. Decision support only — not a prescription.'
+          : 'Formulation suggestion rejected.'
+      )
+    } catch {
+      alert('Could not update the formulation suggestion')
+    }
+  }
+
   if (!caseData) {
     return <div className="container py-8">Loading...</div>
   }
@@ -216,8 +282,11 @@ export default function CaseSheet() {
       </section>
 
       <section className="mb-4">
-        <h2 className="font-semibold text-lg border-b pb-1 mb-2">
-          Pre-Consultation / Symptom Report
+        <h2 className="font-semibold text-lg border-b pb-1 mb-2 flex flex-wrap items-center gap-2">
+          General Clinical History
+          <span className="inline-block text-xs font-medium px-2 py-0.5 rounded-full bg-violet-100 text-violet-800">
+            Patient reported
+          </span>
         </h2>
 
         <div className="bg-white p-4 border rounded shadow-sm">
@@ -372,14 +441,18 @@ export default function CaseSheet() {
         if (groups.length === 0) return null
         return (
           <section className="mb-4">
-            <h2 className="font-semibold text-lg border-b pb-1 mb-2">
+            <h2 className="font-semibold text-lg border-b pb-1 mb-2 flex flex-wrap items-center gap-2">
               Patient-reported Ayurvedic history
+              <span className="inline-block text-xs font-medium px-2 py-0.5 rounded-full bg-violet-100 text-violet-800">
+                Patient reported
+              </span>
             </h2>
             <div className="bg-white p-4 border rounded shadow-sm">
               <p className="text-sm text-gray-500 mb-3">
                 These items were reported by the patient during the
                 pre-consultation interview. They are patient-reported
-                information and are not an Ayurvedic assessment.
+                information and are not an Ayurvedic assessment and do not
+                determine Prakriti or Vikriti.
               </p>
               {groups.map((g: any) => (
                 <div key={g.id} className="mb-4">
@@ -540,28 +613,60 @@ export default function CaseSheet() {
 
       {/* AYUSH Assessment */}
       <section className="mb-4">
-        <h2 className="font-semibold">
-          Doctor Ayurvedic Assessment — Reviewed / Verified
+        <h2 className="font-semibold text-lg border-b pb-1 mb-2 flex flex-wrap items-center gap-2">
+          Doctor Ayurvedic Assessment
+          <span className="inline-block text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-800">
+            Doctor verified
+          </span>
         </h2>
 
         <div className="p-3 border rounded">
           {ayush && !editing && (
             <div>
-              <div>Prakriti: {ayush.prakriti}</div>
-              <div>Vikriti: {ayush.vikriti}</div>
-              <div>Sara: {ayush.sara}</div>
-              <div>Samhanana: {ayush.samhanna}</div>
-              <div>Pramana: {ayush.pramana}</div>
-              <div>Satmya: {ayush.satmya}</div>
-              <div>Sattva: {ayush.sattva}</div>
-              <div>Ahara Shakti: {ayush.aharaShakti}</div>
-              <div>Vyayama Shakti: {ayush.vyayamaShakti}</div>
-              <div>Vaya: {ayush.vaya}</div>
-              <div>Ahara-Vihara: {ayush.aharaVihara}</div>
-              <div>Agni: {ayush.agni}</div>
-              <div>Koshtha: {ayush.koshtha}</div>
-              <div>Nadi: {ayush.nadi}</div>
-              <div>Note: {ayush.note}</div>
+              <div className="font-medium text-sm text-slate-700 border-b mt-2">
+                History &amp; lifestyle
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 text-sm mt-1">
+                <div>Prakriti: {ayush.prakriti}</div>
+                <div>Vikriti: {ayush.vikriti}</div>
+                <div>Satmya: {ayush.satmya}</div>
+                <div>Sattva: {ayush.sattva}</div>
+                <div>Ahara Shakti: {ayush.aharaShakti}</div>
+                <div>Vyayama Shakti: {ayush.vyayamaShakti}</div>
+                <div>Vaya: {ayush.vaya}</div>
+                <div>Ahara-Vihara: {ayush.aharaVihara}</div>
+                <div>Agni: {ayush.agni}</div>
+                <div>Koshtha: {ayush.koshtha}</div>
+                <div>Sleep (history): {ayush.sleep || 'Not recorded'}</div>
+              </div>
+
+              <div className="font-medium text-sm text-slate-700 border-b mt-3">
+                Clinical examination
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 text-sm mt-1">
+                <div>Sara: {ayush.sara}</div>
+                <div>Samhanana: {ayush.samhanna}</div>
+                <div>Pramana: {ayush.pramana}</div>
+                <div>Nadi (pulse): {ayush.nadi}</div>
+              </div>
+
+              {ayush.nadiData && (
+                <div className="mt-2 text-sm">
+                  <div className="font-medium text-slate-700 border-b">
+                    Pulse (Nadi) — structured capture
+                  </div>
+                  {ayush.nadiData.rateBpm !== undefined &&
+                  ayush.nadiData.rateBpm !== null
+                    ? <div>Rate: {ayush.nadiData.rateBpm} bpm</div>
+                    : null}
+                  {ayush.nadiData.rhythm ? <div>Rhythm: {ayush.nadiData.rhythm}</div> : null}
+                  {ayush.nadiData.gati ? <div>Gati: {ayush.nadiData.gati}</div> : null}
+                  {ayush.nadiData.quality ? <div>Quality: {ayush.nadiData.quality}</div> : null}
+                  {ayush.nadiData.note ? <div>Pulse note: {ayush.nadiData.note}</div> : null}
+                </div>
+              )}
+
+              {ayush.note && <div className="mt-2 text-sm">Note: {ayush.note}</div>}
 
               <div className="mt-2">
                 Status: {ayush.status}
@@ -735,6 +840,17 @@ export default function CaseSheet() {
               </label>
 
               <label>
+                Sleep (history)
+                <input
+                  className="w-full border p-1"
+                  value={form.sleep || ''}
+                  onChange={(e) =>
+                    setForm({ ...form, sleep: e.target.value })
+                  }
+                />
+              </label>
+
+              <label>
                 Agni
                 <input
                   className="w-full border p-1"
@@ -756,8 +872,62 @@ export default function CaseSheet() {
                 />
               </label>
 
+              <div className="font-medium text-sm text-slate-700 border-b pt-2">
+                Nadi (pulse) — doctor-side examination
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <label>
+                  Pulse rate (bpm)
+                  <input
+                    type="number"
+                    min={0}
+                    max={300}
+                    className="w-full border p-1"
+                    value={
+                      form.nadiData?.rateBpm === undefined ||
+                      form.nadiData?.rateBpm === null
+                        ? ''
+                        : String(form.nadiData.rateBpm)
+                    }
+                    onChange={(e) => setNadi('rateBpm', e.target.value)}
+                  />
+                </label>
+                <label>
+                  Rhythm
+                  <input
+                    className="w-full border p-1"
+                    value={form.nadiData?.rhythm || ''}
+                    onChange={(e) => setNadi('rhythm', e.target.value)}
+                  />
+                </label>
+                <label>
+                  Gati
+                  <input
+                    className="w-full border p-1"
+                    value={form.nadiData?.gati || ''}
+                    onChange={(e) => setNadi('gati', e.target.value)}
+                  />
+                </label>
+                <label>
+                  Quality
+                  <input
+                    className="w-full border p-1"
+                    value={form.nadiData?.quality || ''}
+                    onChange={(e) => setNadi('quality', e.target.value)}
+                  />
+                </label>
+              </div>
               <label>
-                Nadi
+                Pulse note
+                <textarea
+                  className="w-full border p-1"
+                  value={form.nadiData?.note || ''}
+                  onChange={(e) => setNadi('note', e.target.value)}
+                />
+              </label>
+
+              <label>
+                Nadi (free text)
                 <input
                   className="w-full border p-1"
                   value={form.nadi || ''}
@@ -784,11 +954,17 @@ export default function CaseSheet() {
                     await fetch(`/api/doctor/ayush/${id}`, {
                       method: 'POST',
                       headers: { 'content-type': 'application/json' },
-                      body: JSON.stringify(form),
+                      body: JSON.stringify({
+                        ...form,
+                        nadiData: cleanedNadiData(),
+                      }),
                     })
                       .then((r) => r.json())
                       .then((d) => {
                         setAyush(d.ayush)
+                        setForm(d.ayush || {})
+                        setDoshaAssessment(d.doshaAssessment || null)
+                        setSuggestions(d.suggestions || [])
                         setEditing(false)
                       })
                   }}
@@ -811,6 +987,160 @@ export default function CaseSheet() {
           )}
         </div>
       </section>
+
+      {/* Doshic decision support */}
+      <section className="mb-4">
+          <h2 className="font-semibold text-lg border-b pb-1 mb-2">
+            Doshic assessment
+          </h2>
+          <div className="bg-white p-4 border rounded shadow-sm">
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              <span className="inline-block text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                Suggested — requires doctor review
+              </span>
+              <span className="inline-block text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                Decision support
+              </span>
+            </div>
+            <p className="text-sm text-slate-700 mb-3">
+              {doshaAssessment?.result?.conclusion ||
+                'No doctor-verified Ayurvedic assessment saved yet. Save the assessment to generate rule-based doshic decision support.'}
+            </p>
+            <div className="space-y-2">
+              {(doshaAssessment?.result?.doshas || []).map((d: any) => (
+                <div
+                  key={d.dosha}
+                  className={`p-2 border rounded ${
+                    d.suggested
+                      ? 'bg-amber-50 border-amber-200'
+                      : 'bg-slate-50 border-slate-200'
+                  }`}
+                >
+                  <div className="text-sm font-medium capitalize">
+                    {d.dosha}
+                    {d.suggested ? ' — suggested' : ' — no matching evidence'}
+                  </div>
+                  {d.evidence && d.evidence.length > 0 && (
+                    <ul className="text-xs text-slate-600 mt-1 list-disc list-inside">
+                      {d.evidence.map((e: any, i: number) => (
+                        <li key={i}>
+                          <span className="font-medium">{e.fieldLabel}</span>{' '}
+                          — &ldquo;{e.matchedTerm}&rdquo; ({e.note})
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-slate-500 mt-3">
+              Deterministic, rule-based output generated only from the
+              doctor-verified assessment. It does not determine Prakriti or
+              Vikriti by itself and is not a diagnosis.
+            </p>
+          </div>
+        </section>
+
+        {/* Decision-support formulation suggestions */}
+        <section className="mb-4">
+          <h2 className="font-semibold text-lg border-b pb-1 mb-2">
+            Decision-support formulation suggestions
+          </h2>
+          <div className="bg-white p-4 border rounded shadow-sm">
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              <span className="inline-block text-xs font-medium px-2 py-0.5 rounded-full bg-sky-100 text-sky-800">
+                Demo formulary
+              </span>
+              <span className="inline-block text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                Suggested — requires doctor review
+              </span>
+            </div>
+            <p className="text-sm text-slate-600 mb-3">
+              Curated demo formulary entries matched by rule from the
+              doctor-verified doshic assessment. They are not medical advice
+              and do not form a prescription. Each suggestion requires the
+              treating doctor&apos;s review.
+            </p>
+            {suggestions.filter((s: any) => s.active).length === 0 ? (
+              <div className="text-gray-500 italic">
+                No active suggested formulations yet. Save the doctor Ayurvedic
+                assessment to generate rule-based suggestions.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {suggestions
+                  .filter((s: any) => s.active)
+                  .map((s: any) => (
+                    <div key={s.id} className="p-3 border rounded">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium">{s.formulationName}</span>
+                        <span className="text-xs text-gray-500">
+                          {s.category}
+                        </span>
+                        <span
+                          className={`text-xs px-2 py-0.5 rounded-full ${(() => {
+                            switch (s.status) {
+                              case 'APPROVED':
+                                return 'bg-green-100 text-green-800'
+                              case 'REJECTED':
+                                return 'bg-red-100 text-red-800'
+                              default:
+                                return 'bg-gray-100 text-gray-700'
+                            }
+                          })()}`}
+                        >
+                          {s.status}
+                        </span>
+                      </div>
+                      <div className="text-sm mt-1">
+                        Matched doshas: {(s.matchedDoshas || []).join(', ')}
+                      </div>
+                      <div className="text-sm text-slate-600 mt-1">
+                        {s.rationale}
+                      </div>
+                      {s.status !== 'SUGGESTED' && (
+                        <div className="text-xs text-slate-500 mt-1">
+                          Reviewed by {s.reviewedById || '—'} at{' '}
+                          {s.reviewedAt
+                            ? new Date(s.reviewedAt).toLocaleString()
+                            : '—'}
+                          {s.reviewerNote ? ` — ${s.reviewerNote}` : ''}
+                        </div>
+                      )}
+                      {s.status === 'SUGGESTED' && (
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <input
+                            type="text"
+                            placeholder="Review note (optional)"
+                            className="border p-1 text-sm rounded w-full max-w-xs"
+                            value={reviewNotes[s.id] || ''}
+                            onChange={(e) =>
+                              setReviewNotes((prev) => ({
+                                ...prev,
+                                [s.id]: e.target.value,
+                              }))
+                            }
+                          />
+                          <button
+                            onClick={() => reviewSuggestion(s, 'APPROVED')}
+                            className="px-3 py-1 bg-green-600 text-white rounded text-xs"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => reviewSuggestion(s, 'REJECTED')}
+                            className="px-3 py-1 bg-red-600 text-white rounded text-xs"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        </section>
     </main>
   )
 }

@@ -23,35 +23,38 @@ model User {
 }
 
 model Patient {
-  id                      String                   @id @default(uuid())
-  userId                  String                   @unique
-  abhaId                  String?                  @unique
-  abhaLinkedAt            DateTime?
-  dob                     DateTime?
-  gender                  String?
-  preferredLanguage       String?
-  ayushAssessments        AyushAssessment[]
-  consents                Consent[]
-  consultations           Consultation[]
-  emergencyAlerts         EmergencyAlert[]
-  documents               MedicalDocument[]
-  summaries               MedicalSummary[]
-  timelines               MedicalTimeline[]
-  user                    User                     @relation(fields: [userId], references: [id])
-  complaints              PatientComplaint[]
-  preConsultationSessions PreConsultationSession[]
+  id                            String                   @id @default(uuid())
+  userId                        String                   @unique
+  abhaId                        String?                  @unique
+  abhaLinkedAt                  DateTime?
+  dob                           DateTime?
+  gender                        String?
+  preferredLanguage             String?
+  ayushAssessments              AyushAssessment[]
+  ayushDoshaAssessments         AyushDoshaAssessment[]
+  ayushFormulationSuggestions   AyushFormulationSuggestion[]
+  consents                      Consent[]
+  consultations                 Consultation[]
+  emergencyAlerts               EmergencyAlert[]
+  documents                     MedicalDocument[]
+  summaries                     MedicalSummary[]
+  timelines                     MedicalTimeline[]
+  user                          User                     @relation(fields: [userId], references: [id])
+  complaints                    PatientComplaint[]
+  preConsultationSessions       PreConsultationSession[]
 }
 
 model Doctor {
-  id               String               @id @default(uuid())
-  userId           String               @unique
-  speciality       String?
-  ayushAssessments AyushAssessment[]
-  consultations    Consultation[]
-  user             User                 @relation(fields: [userId], references: [id])
-  credentials      DoctorCredential[]
-  verifications    DoctorVerification[]
-  hospitalLinks    HospitalDoctor[]
+  id                       String               @id @default(uuid())
+  userId                   String               @unique
+  speciality               String?
+  ayushAssessments         AyushAssessment[]
+  ayushDoshaAssessments    AyushDoshaAssessment[]
+  consultations            Consultation[]
+  user                     User                 @relation(fields: [userId], references: [id])
+  credentials              DoctorCredential[]
+  verifications            DoctorVerification[]
+  hospitalLinks            HospitalDoctor[]
 }
 
 model Hospital {
@@ -84,21 +87,23 @@ model Consent {
 }
 
 model Consultation {
-  id              String                  @id @default(uuid())
-  doctorId        String?
-  hospitalId      String?
-  patientId       String
-  sessionId       String?                 @unique
-  scheduledAt     DateTime?
-  status          ConsultationStatus      @default(PENDING)
-  createdAt       DateTime                @default(now())
-  updatedAt       DateTime                @updatedAt
-  ayushAssessment AyushAssessment?
-  doctor          Doctor?                 @relation(fields: [doctorId], references: [id])
-  hospital        Hospital?               @relation(fields: [hospitalId], references: [id])
-  patient         Patient                 @relation(fields: [patientId], references: [id])
-  session         PreConsultationSession? @relation(fields: [sessionId], references: [id])
-  emergencyAlerts EmergencyAlert[]
+  id                            String                        @id @default(uuid())
+  doctorId                      String?
+  hospitalId                    String?
+  patientId                     String
+  sessionId                     String?                       @unique
+  scheduledAt                   DateTime?
+  status                        ConsultationStatus            @default(PENDING)
+  createdAt                     DateTime                      @default(now())
+  updatedAt                     DateTime                      @updatedAt
+  ayushAssessment               AyushAssessment?
+  ayushDoshaAssessments         AyushDoshaAssessment[]
+  ayushFormulationSuggestions   AyushFormulationSuggestion[]
+  doctor                        Doctor?                       @relation(fields: [doctorId], references: [id])
+  hospital                      Hospital?                     @relation(fields: [hospitalId], references: [id])
+  patient                       Patient                       @relation(fields: [patientId], references: [id])
+  session                       PreConsultationSession?       @relation(fields: [sessionId], references: [id])
+  emergencyAlerts               EmergencyAlert[]
 }
 
 model DoctorVerification {
@@ -301,33 +306,89 @@ model PreConsultationReport {
 }
 
 model AyushAssessment {
-  id             String             @id @default(uuid())
-  patientId      String
-  consultationId String?            @unique
-  doctorId       String
-  prakriti       String?
-  vikriti        String?
-  sara           String?
-  samhanna       String?
-  pramana        String?
-  satmya         String?
-  sattva         String?
-  aharaShakti    String?
-  vyayamaShakti  String?
-  vaya           String?
-  aharaVihara    String?
-  agni           String?
-  koshtha        String?
-  nadi           String?
-  note           String?
-  status         VerificationStatus @default(REVIEWED)
-  verifiedBy     String?
-  verifiedAt     DateTime?
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
-  consultation   Consultation?      @relation(fields: [consultationId], references: [id])
-  doctor         Doctor             @relation(fields: [doctorId], references: [id])
-  patient        Patient            @relation(fields: [patientId], references: [id])
+  id                 String                 @id @default(uuid())
+  patientId          String
+  consultationId     String?                @unique
+  doctorId           String
+  prakriti           String?
+  vikriti            String?
+  sara               String?
+  samhanna           String?
+  pramana            String?
+  satmya             String?
+  sattva             String?
+  aharaShakti        String?
+  vyayamaShakti      String?
+  vaya               String?
+  aharaVihara        String?
+  agni               String?
+  koshtha            String?
+  nadi               String?
+  // Structured pulse capture (doctor-side examination). Free-text fields are
+  // kept aside from structured entries; no diagnostic classification is
+  // inferred from this data anywhere in the platform.
+  nadiData           Json?
+  // First-class sleep / sleep-history field (doctor-verified history,
+  // distinct from the clinical examination fields above).
+  sleep              String?
+  note               String?
+  status             VerificationStatus     @default(REVIEWED)
+  verifiedBy         String?
+  verifiedAt         DateTime?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  consultation       Consultation?          @relation(fields: [consultationId], references: [id])
+  doctor             Doctor                 @relation(fields: [doctorId], references: [id])
+  patient            Patient                @relation(fields: [patientId], references: [id])
+  doshaAssessment    AyushDoshaAssessment?
+}
+
+// Rule-based doshic decision support generated from a doctor-verified
+// AyushAssessment. The `result` holds the deterministic dosha evaluation and
+// the provenance/evidence that produced it. `inputSnapshot` records the exact
+// assessment fields used so the doctor can always see why a rule contributed.
+// The output is decision support only and always requires doctor verification.
+model AyushDoshaAssessment {
+  id                String          @id @default(uuid())
+  ayushAssessmentId String          @unique
+  consultationId    String
+  patientId         String
+  doctorId          String
+  result            Json
+  inputSnapshot     Json
+  computedAt        DateTime        @default(now())
+  ayushAssessment   AyushAssessment @relation(fields: [ayushAssessmentId], references: [id])
+  consultation      Consultation    @relation(fields: [consultationId], references: [id])
+  patient           Patient         @relation(fields: [patientId], references: [id])
+  doctor            Doctor          @relation(fields: [doctorId], references: [id])
+}
+
+// A suggested (demo) formulation generated by the rule engine and reviewed by
+// the doctor. `status` records the doctor's review decision and `reviewedById`
+// / `reviewedAt` / `reviewerNote` persist the reviewer identity, timestamp and
+// note. `active` is true while the suggestion reflects the current assessment;
+// unreviewed suggestions that stop matching the assessment are deactivated.
+// Review decisions are always preserved.
+model AyushFormulationSuggestion {
+  id               String                   @id @default(uuid())
+  patientId        String
+  consultationId   String
+  formularyId      String
+  formulationName  String
+  category         String
+  rationale        String
+  matchedDoshas    Json
+  status           AyushSuggestionStatus    @default(SUGGESTED)
+  active           Boolean                  @default(true)
+  reviewerNote     String?
+  reviewedById     String?
+  reviewedAt       DateTime?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  consultation     Consultation             @relation(fields: [consultationId], references: [id])
+  patient          Patient                  @relation(fields: [patientId], references: [id])
+
+  @@unique([consultationId, formularyId])
 }
 
 model EmergencyAlert {
@@ -421,4 +482,10 @@ enum HospitalDoctorStatus {
   PENDING
   ACTIVE
   SUSPENDED
+}
+
+enum AyushSuggestionStatus {
+  SUGGESTED
+  APPROVED
+  REJECTED
 }
