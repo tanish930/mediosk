@@ -9,6 +9,7 @@ jest.mock('next-auth/react', () => ({ getSession: jest.fn() }))
 jest.mock('../src/lib/storage', () => ({
   uploadFile: jest.fn(),
   readFile: jest.fn(),
+  deleteFile: jest.fn(),
 }))
 
 jest.mock('formidable', () => {
@@ -28,12 +29,13 @@ jest.mock('../src/lib/prisma', () => ({
     medicalDocument: { findUnique: jest.fn(), findMany: jest.fn(), create: jest.fn() },
     documentProcessing: { findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
     accessAudit: { create: jest.fn() },
+    $transaction: jest.fn(),
   },
 }))
 
 import { getSession } from 'next-auth/react'
 import { prisma } from '../src/lib/prisma'
-import { uploadFile, readFile } from '../src/lib/storage'
+import { uploadFile, readFile, deleteFile } from '../src/lib/storage'
 import documentsIndexHandler from '../src/pages/api/patient/documents/index'
 import documentFileHandler from '../src/pages/api/patient/documents/[id]/file'
 import documentRetryHandler from '../src/pages/api/patient/documents/[id]/retry'
@@ -42,6 +44,7 @@ const mockGetSession = getSession as jest.Mock
 const mockPrisma = prisma as any
 const mockUploadFile = uploadFile as jest.Mock
 const mockReadFile = readFile as jest.Mock
+const mockDeleteFile = deleteFile as jest.Mock
 
 const PATIENT_ID = '00000000-0000-0000-0000-000000000100'
 const PATIENT_USER_ID = '00000000-0000-0000-0000-000000000101'
@@ -52,12 +55,35 @@ const PROCESSING_ID = '00000000-0000-0000-0000-000000000130'
 
 const session = { user: { id: PATIENT_USER_ID, role: 'PATIENT' } }
 
-function tempPdf(name = 'rx.pdf') {
+function tempFile(name: string, data: Buffer) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mediosk-doc-'))
   const filepath = path.join(dir, name)
-  const data = Buffer.from('%PDF-1.4 mock content')
   fs.writeFileSync(filepath, data)
   return { dir, filepath, data }
+}
+
+function tempPdf(name = 'rx.pdf') {
+  return tempFile(name, Buffer.from('%PDF-1.4 mock content'))
+}
+
+function tempPng(name = 'scan.png') {
+  return tempFile(
+    name,
+    Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.from('mock png payload'),
+    ])
+  )
+}
+
+function tempJpeg(name = 'scan.jpg') {
+  return tempFile(
+    name,
+    Buffer.concat([
+      Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+      Buffer.from('mock jpeg payload'),
+    ])
+  )
 }
 
 function makeDoc(overrides: Record<string, unknown> = {}) {
@@ -88,6 +114,8 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockGetSession.mockResolvedValue(session)
   mockPrisma.patient.findUnique.mockResolvedValue({ id: PATIENT_ID, userId: PATIENT_USER_ID })
+  // Interactive transaction that applies every write through the mock client.
+  mockPrisma.$transaction.mockImplementation(async (fn: any) => fn(mockPrisma))
 })
 
 describe('GET /api/patient/documents - processing status', () => {
@@ -197,10 +225,10 @@ describe('POST /api/patient/documents - session linkage', () => {
   })
 
   test('upload still works without sessionId', async () => {
-    const pdf = tempPdf()
+    const png = tempPng()
     ;(global as any).__docFields = { title: ['Standalone'] }
     ;(global as any).__docFiles = {
-      file: { filepath: pdf.filepath, size: 50, mimetype: 'image/png', originalFilename: 'scan.png' },
+      file: { filepath: png.filepath, size: 50, mimetype: 'image/png', originalFilename: 'scan.png' },
     }
     mockUploadFile.mockResolvedValue(`/uploads/${PATIENT_ID}/id.png`)
 
@@ -211,7 +239,48 @@ describe('POST /api/patient/documents - session linkage', () => {
     expect(mockPrisma.medicalDocument.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ preConsultationSessionId: null }) })
     )
-    fs.rmSync(pdf.dir, { recursive: true, force: true })
+    fs.rmSync(png.dir, { recursive: true, force: true })
+  })
+
+  test('upload rejects a content/type mismatch with a 400', async () => {
+    const png = tempPng('evil.pdf')
+    ;(global as any).__docFields = {}
+    ;(global as any).__docFiles = {
+      file: { filepath: png.filepath, size: 50, mimetype: 'application/pdf', originalFilename: 'evil.pdf' },
+    }
+
+    const res = await callHandler(documentsIndexHandler, 'POST')
+
+    expect(res.statusCode).toBe(400)
+    expect(res._getJSONData().error).toBe('Invalid file content')
+    expect(mockUploadFile).not.toHaveBeenCalled()
+    expect(mockPrisma.medicalDocument.create).not.toHaveBeenCalled()
+    expect(mockPrisma.documentProcessing.create).not.toHaveBeenCalled()
+    fs.rmSync(png.dir, { recursive: true, force: true })
+  })
+
+  test('upload canonicalizes image/jpg and ignores the original filename extension', async () => {
+    const jpeg = tempJpeg('scan.png')
+    ;(global as any).__docFields = { title: ['Report'] }
+    ;(global as any).__docFiles = {
+      file: { filepath: jpeg.filepath, size: 50, mimetype: 'image/jpg', originalFilename: 'scan.png' },
+    }
+    mockUploadFile.mockResolvedValue(`/uploads/${PATIENT_ID}/id.jpg`)
+
+    const res = await callHandler(documentsIndexHandler, 'POST')
+
+    expect(res.statusCode).toBe(200)
+    expect(mockUploadFile).toHaveBeenCalledTimes(1)
+    expect(mockUploadFile.mock.calls[0][1]).toMatch(
+      new RegExp(`^${PATIENT_ID}/[0-9a-f-]+\\.jpg$`)
+    )
+    expect(mockUploadFile.mock.calls[0][2]).toBe('image/jpeg')
+    expect(mockPrisma.medicalDocument.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ mimeType: 'image/jpeg' }),
+      })
+    )
+    fs.rmSync(jpeg.dir, { recursive: true, force: true })
   })
 
   test('upload rejects an invalid file type', async () => {
@@ -263,6 +332,149 @@ describe('POST /api/patient/documents - session linkage', () => {
     expect(res.statusCode).toBe(500)
     expect(body.error).toBe('Upload failed')
     expect(mockPrisma.documentProcessing.create).not.toHaveBeenCalled()
+    fs.rmSync(pdf.dir, { recursive: true, force: true })
+  })
+})
+
+describe('POST /api/patient/documents - upload consistency and cleanup', () => {
+  const KEY_RE = new RegExp(`^${PATIENT_ID}/[0-9a-f-]+\\.pdf$`)
+
+  function stageUpload(pdf: ReturnType<typeof tempPdf>) {
+    ;(global as any).__docFields = {}
+    ;(global as any).__docFiles = {
+      file: { filepath: pdf.filepath, size: 100, mimetype: 'application/pdf', originalFilename: 'rx.pdf' },
+    }
+    mockUploadFile.mockResolvedValue(`/uploads/${PATIENT_ID}/abc.pdf`)
+  }
+
+  afterEach(() => {
+    mockPrisma.medicalDocument.create.mockReset()
+    mockPrisma.accessAudit.create.mockReset()
+    mockPrisma.documentProcessing.create.mockReset()
+    mockPrisma.$transaction.mockReset()
+    mockUploadFile.mockReset()
+    mockDeleteFile.mockReset()
+  })
+
+  test('successful upload records document, processing job, and upload audit', async () => {
+    const pdf = tempPdf()
+    stageUpload(pdf)
+    mockPrisma.medicalDocument.create.mockResolvedValue(makeDoc())
+
+    const res = await callHandler(documentsIndexHandler, 'POST')
+
+    expect(res.statusCode).toBe(200)
+    expect(mockPrisma.medicalDocument.create).toHaveBeenCalledTimes(1)
+    expect(mockPrisma.accessAudit.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          actorId: PATIENT_USER_ID,
+          actorRole: 'PATIENT',
+          patientId: PATIENT_ID,
+          action: 'DOCUMENT_UPLOAD',
+        }),
+      })
+    )
+    expect(mockPrisma.documentProcessing.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          documentId: DOC_ID,
+          status: 'PENDING',
+        }),
+      })
+    )
+    expect(mockDeleteFile).not.toHaveBeenCalled()
+    fs.rmSync(pdf.dir, { recursive: true, force: true })
+  })
+
+  test('medicalDocument creation failure removes the uploaded storage object', async () => {
+    const pdf = tempPdf()
+    stageUpload(pdf)
+    mockPrisma.medicalDocument.create.mockRejectedValue(new Error('db write failed'))
+
+    const res = await callHandler(documentsIndexHandler, 'POST')
+
+    expect(res.statusCode).toBe(500)
+    expect(res._getJSONData().error).toBe('Upload failed')
+    expect(mockDeleteFile).toHaveBeenCalledTimes(1)
+    expect(mockDeleteFile).toHaveBeenCalledWith(expect.stringMatching(KEY_RE))
+    expect(mockPrisma.documentProcessing.create).not.toHaveBeenCalled()
+    fs.rmSync(pdf.dir, { recursive: true, force: true })
+  })
+
+  test('upload audit creation failure removes the uploaded storage object', async () => {
+    const pdf = tempPdf()
+    stageUpload(pdf)
+    mockPrisma.medicalDocument.create.mockResolvedValue(makeDoc())
+    mockPrisma.accessAudit.create.mockRejectedValue(new Error('audit write failed'))
+
+    const res = await callHandler(documentsIndexHandler, 'POST')
+
+    expect(res.statusCode).toBe(500)
+    expect(res._getJSONData().error).toBe('Upload failed')
+    expect(mockDeleteFile).toHaveBeenCalledTimes(1)
+    expect(mockDeleteFile).toHaveBeenCalledWith(expect.stringMatching(KEY_RE))
+    expect(mockPrisma.documentProcessing.create).not.toHaveBeenCalled()
+    fs.rmSync(pdf.dir, { recursive: true, force: true })
+  })
+
+  test('processing job creation failure removes the uploaded storage object', async () => {
+    const pdf = tempPdf()
+    stageUpload(pdf)
+    mockPrisma.medicalDocument.create.mockResolvedValue(makeDoc())
+    mockPrisma.documentProcessing.create.mockRejectedValue(new Error('job write failed'))
+
+    const res = await callHandler(documentsIndexHandler, 'POST')
+
+    expect(res.statusCode).toBe(500)
+    expect(res._getJSONData().error).toBe('Upload failed')
+    expect(mockDeleteFile).toHaveBeenCalledTimes(1)
+    expect(mockDeleteFile).toHaveBeenCalledWith(expect.stringMatching(KEY_RE))
+    fs.rmSync(pdf.dir, { recursive: true, force: true })
+  })
+
+  test('database transaction failure removes the uploaded storage object', async () => {
+    const pdf = tempPdf()
+    stageUpload(pdf)
+    mockPrisma.$transaction.mockRejectedValue(new Error('transaction aborted'))
+
+    const res = await callHandler(documentsIndexHandler, 'POST')
+
+    expect(res.statusCode).toBe(500)
+    expect(res._getJSONData().error).toBe('Upload failed')
+    expect(mockDeleteFile).toHaveBeenCalledTimes(1)
+    expect(mockDeleteFile).toHaveBeenCalledWith(expect.stringMatching(KEY_RE))
+    fs.rmSync(pdf.dir, { recursive: true, force: true })
+  })
+
+  test('cleanup failure is handled safely and never leaks storage internals', async () => {
+    const pdf = tempPdf()
+    stageUpload(pdf)
+    mockPrisma.medicalDocument.create.mockRejectedValue(new Error('db write failed'))
+    mockDeleteFile.mockRejectedValue(new Error('bucket creds=supersecret'))
+
+    const res = await callHandler(documentsIndexHandler, 'POST')
+
+    expect(res.statusCode).toBe(500)
+    expect(res._getJSONData()).toEqual({ error: 'Upload failed' })
+    expect(mockDeleteFile).toHaveBeenCalledTimes(1)
+    fs.rmSync(pdf.dir, { recursive: true, force: true })
+  })
+
+  test('storage upload failure is reported without cleanup or database writes', async () => {
+    const pdf = tempPdf()
+    ;(global as any).__docFields = {}
+    ;(global as any).__docFiles = {
+      file: { filepath: pdf.filepath, size: 100, mimetype: 'application/pdf', originalFilename: 'rx.pdf' },
+    }
+    mockUploadFile.mockRejectedValue(new Error('upload failed upstream'))
+
+    const res = await callHandler(documentsIndexHandler, 'POST')
+
+    expect(res.statusCode).toBe(500)
+    expect(res._getJSONData().error).toBe('Upload failed')
+    expect(mockDeleteFile).not.toHaveBeenCalled()
+    expect(mockPrisma.medicalDocument.create).not.toHaveBeenCalled()
     fs.rmSync(pdf.dir, { recursive: true, force: true })
   })
 })

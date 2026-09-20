@@ -1,14 +1,27 @@
 import fs from 'fs'
 import path from 'path'
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
+import {
+  isLocalUploadsPath,
+  LOCAL_UPLOADS_PREFIX,
+  resolveUploadsPath,
+} from './storage'
 
 type OCRResult = { text: string }
 
-async function bufferFromUrl(url: string): Promise<Buffer> {
-  // Local uploads
-  if (url.startsWith('/uploads/')) {
-    const key = url.replace(/^\/uploads\//, '')
-    const filePath = path.join(process.cwd(), 'uploads', key)
+export async function bufferFromUrl(url: string): Promise<Buffer> {
+  if (isLocalUploadsPath(url)) {
+    // Local uploads namespace: /uploads/<key>. The key is resolved against the
+    // uploads root and any traversal attempt (raw, nested, encoded, or absolute)
+    // is rejected before a read is attempted.
+    const key = url.slice(LOCAL_UPLOADS_PREFIX.length)
+
+    let filePath: string
+    try {
+      filePath = resolveUploadsPath(key)
+    } catch {
+      throw new Error('Invalid document upload path')
+    }
 
     if (!fs.existsSync(filePath)) {
       throw new Error(`Local upload file not found: ${key}`)
@@ -17,13 +30,14 @@ async function bufferFromUrl(url: string): Promise<Buffer> {
     return fs.readFileSync(filePath)
   }
 
-  // If STORAGE_PROVIDER is s3, try to fetch via S3 using env config
+  // S3 / object storage: retrieval always happens through the configured S3
+  // client, never through a raw HTTP request to the URL itself. There is no
+  // arbitrary HTTP fallback.
   if (process.env.STORAGE_PROVIDER === 's3') {
     try {
       const endpoint = process.env.S3_ENDPOINT || ''
       const bucket = process.env.S3_BUCKET || ''
 
-      // Try to extract key from common URL forms
       let key = url
 
       if (endpoint && url.startsWith(endpoint)) {
@@ -37,7 +51,8 @@ async function bufferFromUrl(url: string): Promise<Buffer> {
           ''
         )
       } else {
-        // Try common HTTP/S3 hostname form
+        // S3 hostname URL form e.g.
+        // https://<bucket>.s3.<region>.amazonaws.com/<key>
         const match = url.match(/https?:\/\/(?:[\w.-]+)\/(.+)$/)
 
         if (match) {
@@ -76,26 +91,14 @@ async function bufferFromUrl(url: string): Promise<Buffer> {
 
       return Buffer.concat(chunks)
     } catch (error) {
-      // Fall through to HTTP fetch.
-      // The HTTP path may still be valid for public/object URLs.
-      if (process.env.NODE_ENV !== 'production') {
-        console.warn('S3 document fetch failed, trying HTTP:', error)
-      }
+      // Never fall back to fetching the URL over HTTP.
+      throw new Error(
+        `Document download failed: ${String((error && (error as any).message) || error)}`
+      )
     }
   }
 
-  // Fallback: fetch over HTTP
-  const res = await fetch(url)
-
-  if (!res.ok) {
-    throw new Error(
-      `Document download failed: ${res.status} ${res.statusText}`
-    )
-  }
-
-  const ab = await res.arrayBuffer()
-
-  return Buffer.from(ab)
+  throw new Error('Unsupported document URL')
 }
 
 function getExtension(url: string): string {
@@ -149,13 +152,16 @@ export async function runOCR(url: string): Promise<OCRResult> {
     // /uploads/report.pdf
     // can have:
     // /uploads/report.pdf.txt
-    if (url.startsWith('/uploads/')) {
-      const key = url.replace(/^\/uploads\//, '')
-      const txtPath = path.join(
-        process.cwd(),
-        'uploads',
-        `${key}.txt`
-      )
+    if (isLocalUploadsPath(url)) {
+      const key = url.slice(LOCAL_UPLOADS_PREFIX.length)
+
+      let txtPath: string
+      try {
+        txtPath = resolveUploadsPath(`${key}.txt`)
+      } catch {
+        // Traversal attempts are never read in the mock cycle either.
+        return { text: '' }
+      }
 
       if (fs.existsSync(txtPath)) {
         return {

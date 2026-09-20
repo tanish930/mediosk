@@ -5,8 +5,11 @@ import fs from 'fs'
 import { randomUUID } from 'crypto'
 
 import { prisma } from '../../../../lib/prisma'
-import { uploadFile } from '../../../../lib/storage'
+import { uploadFile, deleteFile } from '../../../../lib/storage'
 import { canAccessSession } from '../../../../lib/documentAccess'
+import {
+  validateDocumentFile,
+} from '../../../../lib/fileValidation'
 
 export const config = {
   api: {
@@ -109,7 +112,16 @@ export default async function handler(
      * Upload a new medical document.
      */
     if (req.method === 'POST') {
-      const form = new formidable.IncomingForm()
+      const maxUploadMb = parseInt(
+        process.env.MAX_UPLOAD_MB || '10',
+        10
+      )
+
+      const maxSize = maxUploadMb * 1024 * 1024
+
+      const form = new formidable.IncomingForm({
+        maxFileSize: maxSize,
+      })
 
       form.parse(
         req,
@@ -136,39 +148,12 @@ export default async function handler(
             }
 
             /*
-             * File-size validation.
+             * File-size validation (also enforced on the
+             * form itself via maxFileSize as defense in depth).
              */
-            const maxSize =
-              parseInt(
-                process.env.MAX_UPLOAD_MB || '10',
-                10
-              ) *
-              1024 *
-              1024
-
             if (file.size && file.size > maxSize) {
               res.status(400).json({
                 error: 'File too large',
-              })
-              return
-            }
-
-            /*
-             * Allowed upload types.
-             */
-            const allowed = [
-              'application/pdf',
-              'image/png',
-              'image/jpeg',
-              'image/jpg',
-            ]
-
-            if (
-              file.mimetype &&
-              !allowed.includes(file.mimetype)
-            ) {
-              res.status(400).json({
-                error: 'Invalid file type',
               })
               return
             }
@@ -206,19 +191,42 @@ export default async function handler(
 
             const buffer = fs.readFileSync(file.filepath)
 
-            const ext =
-              file.originalFilename?.split('.').pop() || 'bin'
+            /*
+             * Validate the actual file bytes against the
+             * declared MIME type. The declared type and the
+             * original filename extension are not trusted.
+             */
+            const validation = validateDocumentFile(
+              buffer,
+              file.mimetype
+            )
+
+            if (!validation.ok) {
+              res.status(400).json({
+                error: 'Invalid file content',
+              })
+              return
+            }
+
+            const validatedFile = validation.file
+
+            const ext = validatedFile.extension
 
             const key = `${patient.id}/${randomUUID()}.${ext}`
 
-            const contentType =
-              file.mimetype || 'application/octet-stream'
+            const contentType = validatedFile.mimeType
 
             const url = await uploadFile(
               buffer,
               key,
               contentType
             )
+
+            /*
+             * From here on the storage object exists. If any part of the
+             * database step fails we must remove it again (compensation).
+             */
+            let uploadedKey: string | null = key
 
             const title = Array.isArray(f.title)
               ? f.title[0]
@@ -238,44 +246,77 @@ export default async function handler(
                 )
               : null
 
-            const created =
-              await prisma.medicalDocument.create({
-                data: {
-                  patientId: patient.id,
-                  title,
-                  url,
-                  category,
-                  documentDate,
-                  mimeType: contentType,
-                  size: file.size || null,
-                  preConsultationSessionId: sessionId,
-                },
-              })
-
-            await prisma.accessAudit.create({
-              data: {
-                actorId: userId,
-                actorRole: 'PATIENT',
-                patientId: patient.id,
-                action: 'DOCUMENT_UPLOAD',
-                note: `Uploaded ${created.id}`,
-              },
-            })
-
             /*
-             * Create the initial processing job.
+             * Document record, upload audit, and initial processing job are a
+             * single logical database operation: either all of them commit or
+             * none of them do.
              */
-            await prisma.documentProcessing.create({
-              data: {
-                documentId: created.id,
-                status: 'PENDING',
-              },
-            })
+            try {
+              const created =
+                await prisma.$transaction(
+                  async (tx) => {
+                    const record =
+                      await tx.medicalDocument.create({
+                        data: {
+                          patientId: patient.id,
+                          title,
+                          url,
+                          category,
+                          documentDate,
+                          mimeType: contentType,
+                          size: file.size || null,
+                          preConsultationSessionId: sessionId,
+                        },
+                      })
 
-            res.status(200).json({
-              document: created,
-            })
-            return
+                    await tx.accessAudit.create({
+                      data: {
+                        actorId: userId,
+                        actorRole: 'PATIENT',
+                        patientId: patient.id,
+                        action: 'DOCUMENT_UPLOAD',
+                        note: `Uploaded ${record.id}`,
+                      },
+                    })
+
+                    /*
+                     * Create the initial processing job.
+                     */
+                    await tx.documentProcessing.create({
+                      data: {
+                        documentId: record.id,
+                        status: 'PENDING',
+                      },
+                    })
+
+                    return record
+                  }
+                )
+
+              res.status(200).json({
+                document: created,
+              })
+              return
+            } catch (dbErr) {
+              /*
+               * The database step failed after the storage object was uploaded.
+               * Attempt to remove the orphaned object. If cleanup itself fails,
+               * log a safe operational message - storage internals/credentials
+               * are never exposed to the patient, and the response stays the
+               * standard safe 500 below.
+               */
+              if (uploadedKey) {
+                try {
+                  await deleteFile(uploadedKey)
+                } catch (cleanupErr) {
+                  console.error(
+                    'document upload cleanup failed'
+                  )
+                }
+              }
+
+              throw dbErr
+            }
           } catch (err) {
             console.error(
               'document upload error',

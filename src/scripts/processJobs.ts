@@ -82,7 +82,22 @@ export async function processOnce(): Promise<boolean> {
     const stale = new Date(job.updatedAt).getTime() < staleBefore.getTime()
     // A recently updated PROCESSING job is still being worked on elsewhere.
     if (!stale) return false
-    await prisma.documentProcessing.update({ where: { id: job.id }, data: { status: 'FAILED', error: PROCESSING_FAILED_MESSAGE } })
+
+    /*
+     * Atomic reclamation. The update only takes effect while the job is still
+     * PROCESSING and its updatedAt is STILL older than the stale threshold at
+     * the moment of the update. This way a stale job is recovered exactly once,
+     * a job another worker just started working on is never clobbered, and two
+     * workers can never both "reclaim" the same abandoned job.
+     */
+    await prisma.documentProcessing.updateMany({
+      where: {
+        id: job.id,
+        status: 'PROCESSING',
+        updatedAt: { lt: staleBefore },
+      },
+      data: { status: 'FAILED', error: PROCESSING_FAILED_MESSAGE },
+    })
     return true
   }
 
@@ -91,7 +106,18 @@ export async function processOnce(): Promise<boolean> {
   if (job.status !== 'PENDING') return false
 
   try {
-    await prisma.documentProcessing.update({ where: { id: job.id }, data: { status: 'PROCESSING' } })
+    /*
+     * Atomic claim. The transition only succeeds while the job is still
+     * PENDING, so at most one worker can claim a given job even when several
+     * workers race past findFirst at the same time. If the update matches
+     * nothing (count 0), another worker claimed this job first, so we sit out.
+     */
+    const claim = await prisma.documentProcessing.updateMany({
+      where: { id: job.id, status: 'PENDING' },
+      data: { status: 'PROCESSING' },
+    })
+    if (claim.count === 0) return true
+
     const doc = await prisma.medicalDocument.findUnique({ where: { id: job.documentId } })
     if (!doc) throw new ProcessingError(PROCESSING_FAILED_MESSAGE, `Document record not found for job ${job.id}`)
 

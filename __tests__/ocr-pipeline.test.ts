@@ -17,6 +17,7 @@ jest.mock('../src/lib/prisma', () => ({
     documentProcessing: {
       findFirst: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
     medicalDocument: {
       findUnique: jest.fn(),
@@ -45,6 +46,7 @@ const mockedPrisma = {
   documentProcessing: {
     findFirst: prisma.documentProcessing.findFirst as jest.Mock,
     update: prisma.documentProcessing.update as jest.Mock,
+    updateMany: prisma.documentProcessing.updateMany as jest.Mock,
   },
   medicalDocument: {
     findUnique: prisma.medicalDocument.findUnique as jest.Mock,
@@ -91,6 +93,7 @@ beforeEach(() => {
 
   mockedPrisma.documentProcessing.findFirst.mockResolvedValue(null)
   mockedPrisma.documentProcessing.update.mockResolvedValue({} as any)
+  mockedPrisma.documentProcessing.updateMany.mockResolvedValue({ count: 1 } as any)
   mockedPrisma.medicalDocument.findUnique.mockResolvedValue(
     makeDocument()
   )
@@ -378,7 +381,7 @@ describe('worker selection', () => {
     )
   })
 
-  test('does not process a non-stale processing job', async () => {
+  test('does not touch a job another worker is actively processing', async () => {
     const recent = new Date()
 
     mockedPrisma.documentProcessing.findFirst.mockResolvedValue(
@@ -391,13 +394,29 @@ describe('worker selection', () => {
     await processOnce()
 
     expect(mockedRunOCR).not.toHaveBeenCalled()
+    expect(
+      mockedPrisma.documentProcessing.updateMany
+    ).not.toHaveBeenCalled()
   })
 })
 
 describe('stale processing reclamation', () => {
-  test('marks stale processing jobs as failed', async () => {
+  const NOW = new Date('2026-09-20T12:00:00.000Z')
+
+  beforeEach(() => {
+    jest.spyOn(Date, 'now').mockReturnValue(NOW.getTime())
+  })
+
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+  test('marks stale processing jobs as failed atomically', async () => {
+    const staleBefore = new Date(
+      NOW.getTime() - STALE_PROCESSING_MS
+    )
     const staleDate = new Date(
-      Date.now() - STALE_PROCESSING_MS - 60_000
+      NOW.getTime() - STALE_PROCESSING_MS - 60_000
     )
 
     mockedPrisma.documentProcessing.findFirst.mockResolvedValue(
@@ -411,13 +430,161 @@ describe('stale processing reclamation', () => {
 
     expect(mockedRunOCR).not.toHaveBeenCalled()
 
-    expect(mockedPrisma.documentProcessing.update).toHaveBeenCalledWith({
-      where: { id: 'job-1' },
+    expect(
+      mockedPrisma.documentProcessing.updateMany
+    ).toHaveBeenCalledWith({
+      where: {
+        id: 'job-1',
+        status: 'PROCESSING',
+        updatedAt: { lt: staleBefore },
+      },
       data: {
         status: 'FAILED',
         error: PROCESSING_FAILED_MESSAGE,
       },
     })
+
+    expect(
+      mockedPrisma.documentProcessing.update
+    ).not.toHaveBeenCalled()
+  })
+})
+
+describe('atomic job claiming', () => {
+  const NOW = new Date('2026-09-20T12:00:00.000Z')
+
+  beforeEach(() => {
+    jest.spyOn(Date, 'now').mockReturnValue(NOW.getTime())
+  })
+
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+  test('two workers selecting the same PENDING job cannot both claim it', async () => {
+    mockedPrisma.documentProcessing.findFirst.mockResolvedValue(
+      makeJob() as any
+    )
+
+    // Both workers raced past findFirst and saw the job as PENDING. Worker A's
+    // atomic claim wins; worker B's conditional update matches nothing because
+    // the job is already PROCESSING.
+    mockedPrisma.documentProcessing.updateMany
+      .mockResolvedValueOnce({ count: 1 } as any)
+      .mockResolvedValueOnce({ count: 0 } as any)
+
+    const workerA = await processOnce()
+    const workerB = await processOnce()
+
+    expect(workerA).toBe(true)
+    expect(workerB).toBe(true)
+
+    expect(
+      mockedPrisma.documentProcessing.updateMany
+    ).toHaveBeenCalledTimes(2)
+
+    expect(
+      mockedPrisma.documentProcessing.updateMany
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'job-1',
+          status: 'PENDING',
+        }),
+        data: { status: 'PROCESSING' },
+      })
+    )
+
+    // OCR runs exactly once even though two workers raced to claim the job.
+    expect(mockedRunOCR).toHaveBeenCalledTimes(1)
+
+    expect(mockedExtractMedicalData).toHaveBeenCalledTimes(1)
+  })
+
+  test('two workers selecting the same stale PROCESSING job yield one reclamation', async () => {
+    const staleDate = new Date(
+      NOW.getTime() - STALE_PROCESSING_MS - 60_000
+    )
+
+    mockedPrisma.documentProcessing.findFirst.mockResolvedValue(
+      makeJob({
+        status: 'PROCESSING',
+        updatedAt: staleDate,
+      }) as any
+    )
+
+    // Worker A's reclamation wins; worker B's conditional update matches
+    // nothing because the job is no longer PROCESSING.
+    mockedPrisma.documentProcessing.updateMany
+      .mockResolvedValueOnce({ count: 1 } as any)
+      .mockResolvedValueOnce({ count: 0 } as any)
+
+    const workerA = await processOnce()
+    const workerB = await processOnce()
+
+    expect(workerA).toBe(true)
+    expect(workerB).toBe(true)
+
+    expect(mockedRunOCR).not.toHaveBeenCalled()
+
+    expect(
+      mockedPrisma.documentProcessing.updateMany
+    ).toHaveBeenCalledTimes(2)
+
+    expect(
+      mockedPrisma.documentProcessing.updateMany
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'job-1',
+          status: 'PROCESSING',
+          updatedAt: { lt: new Date(NOW.getTime() - STALE_PROCESSING_MS) },
+        }),
+        data: {
+          status: 'FAILED',
+          error: PROCESSING_FAILED_MESSAGE,
+        },
+      })
+    )
+  })
+
+  test('stale job that is no longer stale at claim time is not clobbered', async () => {
+    const staleDate = new Date(
+      NOW.getTime() - STALE_PROCESSING_MS - 60_000
+    )
+
+    mockedPrisma.documentProcessing.findFirst.mockResolvedValue(
+      makeJob({
+        status: 'PROCESSING',
+        updatedAt: staleDate,
+      }) as any
+    )
+
+    // At claim time the row no longer matches the stale threshold (another
+    // worker refreshed it or claimed it), so the reclamation must be skipped.
+    mockedPrisma.documentProcessing.updateMany.mockResolvedValueOnce({
+      count: 0,
+    } as any)
+
+    const result = await processOnce()
+
+    expect(mockedRunOCR).not.toHaveBeenCalled()
+
+    expect(
+      mockedPrisma.documentProcessing.updateMany
+    ).toHaveBeenCalledTimes(1)
+
+    expect(
+      mockedPrisma.documentProcessing.updateMany
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          updatedAt: { lt: expect.any(Date) },
+        }),
+      })
+    )
+
+    expect(result).toBe(true)
   })
 })
 
