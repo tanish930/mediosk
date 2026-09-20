@@ -2,8 +2,8 @@ import { getServerSession } from 'next-auth/next'
 import { NextApiRequest, NextApiResponse } from 'next'
 import { z } from 'zod'
 import { prisma } from '../../../lib/prisma'
-import { authOptions } from '../auth/[...nextauth]'
-import { detectRedFlag } from '../../../lib/redFlags'
+import { authOptions } from '../../../lib/authOptions'
+import { detectRedFlag, isEmergencySeverityValue } from '../../../lib/redFlags'
 
 const BodySchema = z.object({ sessionId: z.string(), createAlert: z.boolean().optional(), hospitalId: z.string().optional() })
 
@@ -21,6 +21,14 @@ function computeSeverityFromReport(report: any, complaint?: string, lang?: strin
   // If report contains explicit redFlags JSON array with entries
   try{ if (Array.isArray(report.redFlags) && report.redFlags.length>0) return 'EMERGENCY' }catch(e){}
 
+  // Same numeric severity gate used by the adaptive question flow and the
+  // per-answer scan: a self-reported severity >= 9 is an emergency. Kept here
+  // so a stop-at-severity interview is still classified as emergency from the
+  // persisted report even when no keyword matched.
+  if (report.severity !== undefined && report.severity !== null && isEmergencySeverityValue(report.severity)) {
+    return 'EMERGENCY'
+  }
+
   // fallback to severity field if present
   const sev = (report.severity||'').toLowerCase()
   if (sev.includes('severe') || sev.includes('critical')) return 'EMERGENCY'
@@ -32,6 +40,8 @@ export default async function handler(req:NextApiRequest,res:NextApiResponse){
   const session = await getServerSession(req, res, authOptions)
   if (!session) return res.status(401).json({ error: 'unauthenticated' })
 
+  if ((session as any).user.role !== 'PATIENT') return res.status(403).json({ error: 'forbidden' })
+
   const parsed = BodySchema.safeParse(req.body)
   if (!parsed.success) return res.status(400).json({ error: 'invalid' })
   const { sessionId, createAlert } = parsed.data
@@ -39,16 +49,27 @@ export default async function handler(req:NextApiRequest,res:NextApiResponse){
   const sess = await prisma.preConsultationSession.findUnique({ where: { id: sessionId }, include: { report: true } })
   if (!sess) return res.status(404).json({ error: 'session not found' })
 
-  // ensure patient owns the session when caller is PATIENT
-  if ((session as any).user.role === 'PATIENT'){
-    const patient = await prisma.patient.findUnique({ where: { userId: (session as any).user.id } })
-    if (!patient || patient.id !== sess.patientId) return res.status(403).json({ error: 'forbidden' })
-  }
+  // patient must own the session
+  const patient = await prisma.patient.findUnique({ where: { userId: (session as any).user.id } })
+  if (!patient || patient.id !== sess.patientId) return res.status(403).json({ error: 'forbidden' })
 
   const severity = computeSeverityFromReport(sess.report||{}, sess.complaint, sess.language)
 
   let alert = null
   if (createAlert && (severity === 'URGENT' || severity === 'EMERGENCY')){
+    // Hospital routing must reference a real Hospital record the application
+    // recognizes. Map-provider results (e.g. Google place_id) are never
+    // trusted: they cannot be routed to and would orphan the alert.
+    let routedHospitalId: string | null = null
+    if (parsed.data.hospitalId) {
+      const hospital = await prisma.hospital.findUnique({ where: { id: parsed.data.hospitalId } })
+      if (!hospital) {
+        await prisma.accessAudit.create({ data: { actorId: (session as any).user.id, actorRole: 'PATIENT', patientId: sess.patientId, consultationId: null, action: 'EMERGENCY_ROUTING_REJECTED', note: 'unrecognized_hospital_id:' + parsed.data.hospitalId } })
+        return res.json({ severity, alert: null, routing: 'invalid_hospital' })
+      }
+      routedHospitalId = hospital.id
+    }
+
     const consultation = await prisma.consultation.findFirst({ where: { sessionId: sess.id } })
     const data:any = {
       patientId: sess.patientId,
@@ -58,10 +79,10 @@ export default async function handler(req:NextApiRequest,res:NextApiResponse){
       source: 'PRECONSULTATION',
       createdBy: (session as any).user.id
     }
-    if (parsed.data.hospitalId) data.hospitalId = parsed.data.hospitalId
+    if (routedHospitalId) data.hospitalId = routedHospitalId
     alert = await prisma.emergencyAlert.create({ data })
 
-    await prisma.accessAudit.create({ data: { actorId: (session as any).user.id, actorRole: (session as any).user.role, patientId: sess.patientId, consultationId: consultation?.id || null, action: 'EMERGENCY_ALERT_CREATED', note: severity + (parsed.data.hospitalId ? ' routed_to_hospital:'+parsed.data.hospitalId : '') } })
+    await prisma.accessAudit.create({ data: { actorId: (session as any).user.id, actorRole: (session as any).user.role, patientId: sess.patientId, consultationId: consultation?.id || null, action: 'EMERGENCY_ALERT_CREATED', note: severity + (routedHospitalId ? ' routed_to_hospital:'+routedHospitalId : '') } })
   }
 
   return res.json({ severity, alert })

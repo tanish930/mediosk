@@ -1,5 +1,5 @@
 import { getServerSession } from 'next-auth/next'
-import { authOptions } from '../../../../auth/[...nextauth]'
+import { authOptions } from '../../../../../../lib/authOptions'
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../../../../../../lib/prisma'

@@ -6,7 +6,7 @@ import type { Prisma } from '@prisma/client'
 import { getNextAdaptiveQuestion } from '../../../../../lib/adaptiveQuestioning'
 import { getQuestionText } from '../../../../../lib/multilingualQuestions'
 import { mapAnswersToReport } from '../../../../../lib/reportMapping'
-import { detectRedFlagFromAnswers } from '../../../../../lib/redFlags'
+import { evaluateEmergencyFromAnswers } from '../../../../../lib/redFlags'
 
 const AnswerSchema = z.object({ questionId: z.string().uuid(), value: z.any() })
 
@@ -42,7 +42,7 @@ if (!userId) {
     const answers = sess.questions
       .filter(q => q.answered && q.key && q.answer)
       .map(q => ({ key: q.key!, value: q.answer!.value }))
-    const redFlag = detectRedFlagFromAnswers(answers, sess.complaint, sess.language)
+    const redFlag = evaluateEmergencyFromAnswers(answers, sess.complaint, sess.language)
     return res.json({
       session: sess,
       progress: { total, answered },
@@ -96,7 +96,7 @@ if (!userId) {
         })
     }
 
-    const redFlag = detectRedFlagFromAnswers(answers, sess.complaint, sess.language)
+    const redFlag = evaluateEmergencyFromAnswers(answers, sess.complaint, sess.language)
 
     return res.json({ ok: true, redFlag: redFlag.severity === 'NORMAL' ? null : redFlag })
   }
@@ -125,7 +125,7 @@ if (!userId) {
 
       const mappedData = mapAnswersToReport(answersByKey, { mode: current.mode })
 
-      const redFlagsResult = detectRedFlagFromAnswers(
+      const redFlagsResult = evaluateEmergencyFromAnswers(
         current.questions
           .filter(q => q.answered && q.key && q.answer)
           .map(q => ({ key: q.key!, value: q.answer!.value })),

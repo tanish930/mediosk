@@ -3,7 +3,7 @@ import type { NextApiRequest, NextApiResponse } from 'next'
 import { z } from 'zod'
 import { findNearbyHospitals } from '../../../lib/maps'
 import { prisma } from '../../../lib/prisma'
-import { authOptions } from '../auth/[...nextauth]'
+import { authOptions } from '../../../lib/authOptions'
 
 const BodySchema = z.object({
   lat: z.number().optional(),

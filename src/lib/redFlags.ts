@@ -281,22 +281,50 @@ export function detectRedFlagFromAnswers(
   return detectRedFlag(parts.join(' '), lang)
 }
 
+// Canonical marker added to `matches` when the numeric severity gate fires
+// without any keyword match. It flows through report.redFlags persistence so
+// a stop-at-severity interview can never silently lose the emergency signal.
+export const SEVERITY_EMERGENCY_MARKER = 'severity 9 or higher'
+
+// Shared numeric severity gate: a self-reported severity of >= 9 is treated
+// as an emergency across the adaptive question flow and report-based
+// detection. There is exactly one such gate in the platform.
+export function isEmergencySeverityValue(value: unknown): boolean {
+  const sevNum = Number(value)
+  return !Number.isNaN(sevNum) && sevNum >= 9
+}
+
+// Authoritative emergency evaluation shared by the adaptive question engine
+// (via checkEmergencyRedFlags) and the server-side per-answer scan. It is the
+// only place that combines keyword detection with the numeric severity gate,
+// so both surfaces always agree on the outcome.
+export function evaluateEmergencyFromAnswers(
+  answers: AnsweredQuestion[],
+  complaint: unknown,
+  lang?: string | null
+): RedFlagResult {
+  const keyword = detectRedFlagFromAnswers(answers, complaint, lang)
+  if (keyword.severity === 'EMERGENCY') return keyword
+
+  const severityAnswer = answers.find(a => a.key === 'severity')
+  if (severityAnswer && isEmergencySeverityValue(severityAnswer.value)) {
+    const matches = keyword.matches.includes(SEVERITY_EMERGENCY_MARKER)
+      ? keyword.matches
+      : [...keyword.matches, SEVERITY_EMERGENCY_MARKER]
+    return { severity: 'EMERGENCY', matches }
+  }
+
+  return keyword
+}
+
 // Backwards-compatible helper used by the adaptive questioning engine and
-// callers that only need a boolean answer (true = EMERGENCY). The numeric
-// severity gate (>= 9) is intentionally kept here so existing behaviour is
-// preserved exactly.
+// callers that only need a boolean answer (true = EMERGENCY). It now
+// delegates to the single authoritative evaluation so the keyword path and
+// the severity gate (>= 9) can never diverge.
 export function checkEmergencyRedFlags(
   answers: AnsweredQuestion[],
   complaint: string,
   lang?: string | null
 ): boolean {
-  if (detectRedFlagFromAnswers(answers, complaint, lang).severity === 'EMERGENCY') {
-    return true
-  }
-  const severityAnswer = answers.find(a => a.key === 'severity')
-  if (severityAnswer) {
-    const sevNum = Number(severityAnswer.value)
-    if (!Number.isNaN(sevNum) && sevNum >= 9) return true
-  }
-  return false
+  return evaluateEmergencyFromAnswers(answers, complaint, lang).severity === 'EMERGENCY'
 }
