@@ -139,7 +139,7 @@ export default function DocumentsPage(){
             </div>
             {d.processing?.status === 'FAILED' && (
               <div className="text-sm text-red-600 mt-1">
-                Processing failed. You can retry the document or continue without it.
+                Processing failed. You can retry processing this document or continue without it.
               </div>
             )}
           </div>

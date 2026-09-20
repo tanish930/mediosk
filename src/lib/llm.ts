@@ -74,14 +74,9 @@ export async function extractMedicalDataLLM(ocrText: string): Promise<Extraction
   if (!ocrText || !ocrText.trim()) return {}
 
   if (PROVIDER === 'mock') {
-    return {
-      diagnoses: ['Mock Diagnosis'],
-      medicines: [{ name: 'Mock Medicine', dosage: '10mg', frequency: 'daily' }],
-      investigations: [{ name: 'Mock Blood Test', value: '12', unit: 'g/dL', referenceRange: '11-15' }],
-      procedures: [{ name: 'Mock Surgery', date: '2026-09-12' }],
-      findings: ['Mock clinical findings'],
-      dates: ['2026-09-12']
-    }
+    // Deterministic, honest local extraction for mock mode: derive only what is
+    // actually present in the text. No invented diagnoses or medicines.
+    return extractFromText(ocrText)
   }
 
   // Sensible truncation to protect LLM request (approx 3000 tokens)
