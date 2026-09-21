@@ -306,4 +306,111 @@ describe('GET /api/doctor/case/[id]', () => {
     expect(body.clinicalNotes).toHaveLength(1)
     expect(body.clinicalNotes[0]).toMatchObject({ id: 'note-1', text: 'First note' })
   })
+
+  test('unverified document target returns an empty verification list (UI shows Not yet reviewed)', async () => {
+    mockConsultation(SESSION_ID)
+    mockPrisma.medicalDocument.findMany.mockResolvedValue([{ id: 'doc-unverified', title: 'Labs', documentDate: null, extractions: [] }])
+    mockPrisma.doctorVerification.findMany.mockResolvedValue([])
+
+    const res = await callHandler('GET', { id: CONSULTATION_ID })
+    const body = res._getJSONData()
+
+    expect(res.statusCode).toBe(200)
+    expect(body.verifications).toEqual([])
+    expect(body.documents[0].id).toBe('doc-unverified')
+  })
+
+  test('verification records expose status, note, timestamp and target for display', async () => {
+    mockConsultation(SESSION_ID)
+    const createdAt = new Date('2026-09-21T12:30:00.000Z')
+    mockPrisma.medicalDocument.findMany.mockResolvedValue([{ id: 'doc-1', title: 'Labs', documentDate: null, extractions: [] }])
+    mockPrisma.doctorVerification.findMany.mockResolvedValue([
+      {
+        id: 'v-3',
+        doctorId: DOCTOR_ID,
+        targetType: 'DOCUMENT',
+        targetId: 'doc-1',
+        status: 'REVIEWED',
+        note: 'Values match the printed report',
+        createdAt,
+      },
+    ])
+
+    const res = await callHandler('GET', { id: CONSULTATION_ID })
+    const body = res._getJSONData()
+
+    expect(res.statusCode).toBe(200)
+    expect(body.verifications[0]).toMatchObject({
+      id: 'v-3',
+      doctorId: DOCTOR_ID,
+      targetType: 'DOCUMENT',
+      targetId: 'doc-1',
+      status: 'REVIEWED',
+      note: 'Values match the printed report',
+    })
+    expect(body.verifications[0].createdAt).toBe(createdAt.toISOString())
+  })
+
+  test('verification records never modify the original extracted document data', async () => {
+    mockConsultation(SESSION_ID)
+    const extractions = [{ id: 'ex-1', extracted: { investigations: [{ name: 'HB', value: '9.2', unit: 'g/dL', referenceRange: '12-16' }] } }]
+    mockPrisma.medicalDocument.findMany.mockResolvedValue([
+      { id: 'doc-origin', title: 'Labs', documentDate: null, extractions },
+    ])
+    mockPrisma.doctorVerification.findMany.mockResolvedValue([
+      { id: 'v-4', doctorId: DOCTOR_ID, targetType: 'DOCUMENT', targetId: 'doc-origin', status: 'VERIFIED', note: 'Confirmed', createdAt: new Date('2026-09-21T13:00:00.000Z') },
+    ])
+
+    const res = await callHandler('GET', { id: CONSULTATION_ID })
+    const body = res._getJSONData()
+
+    expect(res.statusCode).toBe(200)
+    expect(body.documents[0].extractions).toEqual(extractions)
+    expect(body.documents[0].abnormalities[0]).toMatchObject({
+      name: 'HB',
+      value: '9.2',
+      unit: 'g/dL',
+      referenceRange: '12-16',
+    })
+    expect(body.verifications[0].status).toBe('VERIFIED')
+  })
+
+  test('verification lookup includes timeline source documents but stays scoped to this case and doctor', async () => {
+    mockConsultation(SESSION_ID)
+    mockPrisma.medicalTimeline.findMany.mockResolvedValue([
+      { id: 't-1', title: 'Incident', entryType: 'FINDING', details: 'Old report', sourceDocumentId: 'doc-from-past', date: new Date() },
+    ])
+    mockPrisma.medicalDocument.findMany.mockResolvedValue([{ id: 'doc-1', title: 'Labs', documentDate: null, extractions: [] }])
+    mockPrisma.doctorVerification.findMany.mockResolvedValue([])
+
+    await callHandler('GET', { id: CONSULTATION_ID })
+
+    expect(mockPrisma.doctorVerification.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          doctorId: DOCTOR_ID,
+          targetId: { in: expect.arrayContaining(['doc-from-past', 'doc-1']) },
+        }),
+      })
+    )
+  })
+
+  test('verification records for unrelated consultations are not exposed', async () => {
+    mockConsultation(SESSION_ID)
+    mockPrisma.medicalDocument.findMany.mockResolvedValue([{ id: 'doc-1', title: 'Labs', documentDate: null, extractions: [] }])
+    mockPrisma.doctorVerification.findMany.mockResolvedValue([
+      { id: 'v-case', doctorId: DOCTOR_ID, targetType: 'DOCUMENT', targetId: 'doc-1', status: 'REVIEWED', note: 'case note', createdAt: new Date() },
+    ])
+
+    const res = await callHandler('GET', { id: CONSULTATION_ID })
+    const body = res._getJSONData()
+
+    expect(res.statusCode).toBe(200)
+    const callArgs = mockPrisma.doctorVerification.findMany.mock.calls[0][0]
+    expect(callArgs.where).toMatchObject({ doctorId: DOCTOR_ID })
+    expect(callArgs.where.targetId.in).toContain('doc-1')
+    expect(callArgs.where.targetId.in).not.toContain('doc-user-1')
+    expect(body.verifications.map((v: any) => v.targetId)).toEqual(['doc-1'])
+    expect(body.verifications.every((v: any) => v.doctorId === DOCTOR_ID)).toBe(true)
+  })
 })

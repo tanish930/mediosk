@@ -73,11 +73,16 @@ if (role !== 'DOCTOR') {
   const timelines = await prisma.medicalTimeline.findMany({ where: { patientId: consultation.patientId }, orderBy: { date: 'desc' } })
 
   // Existing verification records for this doctor on the displayed targets so
-  // the case sheet can reflect current status and any saved notes.
+  // the case sheet can reflect current status and any saved notes. Timeline
+  // source document ids are included so document-derived timeline entries can
+  // surface the parent document's verification state too. Only the current
+  // doctor's records are fetched, so another doctor's review notes are never
+  // exposed.
   const verificationTargetIds = [
     consultation.session?.report?.id,
     ...summaries.map((s) => s.id),
     ...documents.map((d) => d.id),
+    ...timelines.map((t) => t.sourceDocumentId),
   ].filter((t): t is string => Boolean(t))
   const verifications = verificationTargetIds.length
     ? await prisma.doctorVerification.findMany({ where: { doctorId: doctor.id, targetId: { in: verificationTargetIds } }, orderBy: { createdAt: 'asc' } })

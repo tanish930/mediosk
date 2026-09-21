@@ -324,6 +324,76 @@ function DoctorClinicalNotesSection({
   )
 }
 
+function verificationStatusBadgeClass(status: string): string {
+  switch (status) {
+    case 'VERIFIED':
+      return 'bg-green-100 text-green-800 border-green-300'
+    case 'REVIEWED':
+      return 'bg-amber-100 text-amber-800 border-amber-300'
+    case 'AI_GENERATED':
+      return 'bg-slate-100 text-slate-600 border-slate-300'
+    default:
+      return 'bg-slate-100 text-slate-600 border-slate-300'
+  }
+}
+
+function formatTimestamp(value?: string | Date | null): string {
+  if (!value) return ''
+  const d = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString()
+}
+
+// Concise, read-only summary of the current doctor's verification state for a
+// single verifiable target. "Reviewed"/"Verified" reflects a doctor's explicit
+// review action recorded in DoctorVerification; it never implies clinical
+// correctness and never overwrites or alters the original AI/OCR-extracted
+// content (which stays visible alongside).
+function VerificationSummary({
+  latest,
+  doctorName,
+}: {
+  latest?: any | null
+  doctorName?: string | null
+}) {
+  const status = latest?.status
+
+  if (!status || status === 'AI_GENERATED') {
+    return (
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="inline-block px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300">
+          AI Generated
+        </span>
+        <span className="text-slate-500">Not yet reviewed</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      <span
+        className={`inline-block px-2 py-0.5 rounded-full border font-medium ${verificationStatusBadgeClass(
+          status
+        )}`}
+      >
+        {status}
+      </span>
+      <span className="text-slate-600">
+        Doctor: <span className="font-medium">{doctorName || '—'}</span>
+      </span>
+      {latest.createdAt && (
+        <span className="text-slate-500">
+          {status === 'VERIFIED' ? 'Verified' : 'Reviewed'}:{' '}
+          {formatTimestamp(latest.createdAt)}
+        </span>
+      )}
+      {latest.note && (
+        <span className="text-slate-600">Note: {latest.note}</span>
+      )}
+    </div>
+  )
+}
+
 function VerificationControls({
   targetType,
   targetId,
@@ -331,6 +401,7 @@ function VerificationControls({
   notes,
   onNoteChange,
   onVerify,
+  doctorName,
 }: {
   targetType: string
   targetId: string
@@ -338,6 +409,7 @@ function VerificationControls({
   notes: Record<string, string>
   onNoteChange: (key: string, value: string) => void
   onVerify: (targetType: string, targetId: string, status: string, note?: string) => void
+  doctorName?: string | null
 }) {
   const latest = [...(verifications || [])]
     .reverse()
@@ -346,6 +418,7 @@ function VerificationControls({
 
   return (
     <div className="mt-2 space-y-1">
+      <VerificationSummary latest={latest} doctorName={doctorName} />
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <button
           type="button"
@@ -361,12 +434,6 @@ function VerificationControls({
         >
           Mark Verified
         </button>
-        {latest && (
-          <span className="text-xs text-gray-600">
-            Status: <span className="font-medium">{latest.status}</span>
-            {latest.note ? ` — ${latest.note}` : ''}
-          </span>
-        )}
       </div>
       <input
         type="text"
@@ -758,6 +825,7 @@ export default function CaseSheet({
                     setNotes((prev) => ({ ...prev, [key]: value }))
                   }
                   onVerify={(t, tid, s, note) => verify(t, tid, s, note)}
+                  doctorName={doctorName}
                 />
               </div>
             </div>
@@ -835,6 +903,7 @@ export default function CaseSheet({
                   setNotes((prev) => ({ ...prev, [key]: value }))
                 }
                 onVerify={(t, tid, status, note) => verify(t, tid, status, note)}
+                doctorName={doctorName}
               />
             </div>
           ))}
@@ -864,6 +933,15 @@ export default function CaseSheet({
               </div>
 
               <div className="text-sm mt-0.5">{t.details}</div>
+
+              {t.sourceDocumentId && (
+                <div className="mt-1">
+                  <VerificationSummary
+                    latest={latestVerification('DOCUMENT', t.sourceDocumentId)}
+                    doctorName={doctorName}
+                  />
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -898,6 +976,12 @@ export default function CaseSheet({
                 <div className="mt-1 p-2 bg-slate-50 border rounded">
                   <div className="font-semibold text-sm">
                     Investigation Levels (AI/OCR extracted)
+                  </div>
+                  <div className="mt-1">
+                    <VerificationSummary
+                      latest={latestVerification('DOCUMENT', d.id)}
+                      doctorName={doctorName}
+                    />
                   </div>
                   <div className="space-y-1 mt-1 text-sm">
                     {d.abnormalities.map((inv: any, i: number) => (
@@ -942,6 +1026,7 @@ export default function CaseSheet({
                   setNotes((prev) => ({ ...prev, [key]: value }))
                 }
                 onVerify={(t, tid, status, note) => verify(t, tid, status, note)}
+                doctorName={doctorName}
               />
             </div>
           ))}
@@ -1005,13 +1090,19 @@ export default function CaseSheet({
 
               {ayush.note && <div className="mt-2 text-sm">Note: {ayush.note}</div>}
 
-              <div className="mt-2">
-                Status: {ayush.status}
-                {ayush.verifiedAt
-                  ? ` — verified at ${new Date(
-                      ayush.verifiedAt
-                    ).toLocaleString()}`
-                  : ''}
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                <span
+                  className={`inline-block px-2 py-0.5 rounded-full border font-medium ${verificationStatusBadgeClass(
+                    ayush.status
+                  )}`}
+                >
+                  {ayush.status}
+                </span>
+                {ayush.verifiedAt && (
+                  <span className="text-slate-500">
+                    Verified: {new Date(ayush.verifiedAt).toLocaleString()}
+                  </span>
+                )}
               </div>
 
               <div className="mt-2">
