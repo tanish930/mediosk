@@ -123,6 +123,122 @@ function EmergencyAlertsSubsection({ alerts }: { alerts: any[] }) {
   )
 }
 
+const OUTCOME_OPTIONS = [
+  { value: 'COMPLETED', label: 'Completed' },
+  { value: 'FOLLOW_UP', label: 'Follow-up' },
+  { value: 'REFERRED', label: 'Referral' },
+  { value: 'NOT_COMPLETED', label: 'Not Completed' },
+]
+
+function outcomeLabel(value?: string | null): string {
+  const found = OUTCOME_OPTIONS.find((o) => o.value === value)
+  return found ? found.label : value || 'Not recorded'
+}
+
+// Compact consultation disposition. Records a minimal outcome on completion;
+// after completion it is read-only. This is never a diagnosis or treatment
+// plan, and it cannot be re-opened from here.
+function ConsultationOutcomeSection({
+  consultation,
+  onSubmit,
+}: {
+  consultation: any
+  onSubmit: (outcome: string, outcomeNote: string) => Promise<void>
+}) {
+  const [outcome, setOutcome] = useState('COMPLETED')
+  const [outcomeNote, setOutcomeNote] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  const completed =
+    consultation.status === 'COMPLETED' || Boolean(consultation.completedAt)
+
+  if (completed) {
+    return (
+      <section className="mb-4">
+        <h2 className="font-semibold text-lg border-b pb-1 mb-2">
+          Consultation Outcome
+        </h2>
+        <div className="p-3 border rounded bg-slate-50">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">Outcome:</span>
+            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+              {outcomeLabel(consultation.outcome)}
+            </span>
+          </div>
+          {consultation.outcomeNote && (
+            <div className="text-sm mt-1">
+              <span className="text-gray-600">Encounter note:</span>{' '}
+              {consultation.outcomeNote}
+            </div>
+          )}
+          {consultation.completedAt && (
+            <div className="text-sm mt-1 text-gray-600">
+              Completed at: {new Date(consultation.completedAt).toLocaleString()}
+            </div>
+          )}
+          <p className="text-xs text-slate-500 mt-2">
+            Encounter disposition recorded for this consultation. It is not a
+            diagnosis or treatment plan.
+          </p>
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <section className="mb-4">
+      <h2 className="font-semibold text-lg border-b pb-1 mb-2">
+        Consultation Outcome
+      </h2>
+      <div className="bg-white p-4 border rounded shadow-sm space-y-3">
+        <p className="text-sm text-slate-600">
+          Record a minimal outcome for this consultation before finishing.
+          Choose an outcome and add an optional encounter note. This is not a
+          diagnosis or a prescription.
+        </p>
+        <label className="block text-sm">
+          Outcome
+          <select
+            className="w-full border p-1 mt-1"
+            value={outcome}
+            onChange={(e) => setOutcome(e.target.value)}
+          >
+            {OUTCOME_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-sm">
+          Encounter note (optional)
+          <textarea
+            className="w-full border p-1 mt-1"
+            value={outcomeNote}
+            maxLength={2000}
+            placeholder="Brief encounter note (optional)"
+            onChange={(e) => setOutcomeNote(e.target.value)}
+          />
+        </label>
+        <button
+          onClick={async () => {
+            setSubmitting(true)
+            try {
+              await onSubmit(outcome, outcomeNote)
+            } finally {
+              setSubmitting(false)
+            }
+          }}
+          disabled={submitting}
+          className="px-3 py-2 bg-green-600 text-white rounded"
+        >
+          {submitting ? 'Completing...' : 'Complete Consultation'}
+        </button>
+      </div>
+    </section>
+  )
+}
+
 function VerificationControls({
   targetType,
   targetId,
@@ -262,6 +378,25 @@ export default function CaseSheet() {
       }
     } catch {
       // keep the current data if the refresh fails
+    }
+  }
+
+  async function completeConsultation(outcome: string, outcomeNote: string) {
+    try {
+      const res = await fetch(`/api/consultations/${id}/end`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ outcome, outcomeNote }),
+      })
+      const body = await res.json().catch(() => null)
+      if (!res.ok) {
+        alert((body as any)?.error || 'Could not complete the consultation')
+        return
+      }
+      await refreshCase()
+      alert('Consultation completed')
+    } catch {
+      alert('Could not complete the consultation')
     }
   }
 
@@ -1234,6 +1369,10 @@ export default function CaseSheet() {
             )}
           </div>
         </section>
+        <ConsultationOutcomeSection
+          consultation={data}
+          onSubmit={completeConsultation}
+        />
     </main>
   )
 }

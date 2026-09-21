@@ -124,6 +124,24 @@ describe('GET /api/doctor/case/[id]', () => {
     expect(body.consultation?.patient?.documents).toBeUndefined()
   })
 
+  test('case response exposes consultation outcome fields additively', async () => {
+    const completedAt = new Date('2026-09-21T10:00:00.000Z')
+    mockPrisma.consultation.findUnique.mockResolvedValue({
+      ...mockConsultation(SESSION_ID),
+      outcome: 'REFERRED',
+      outcomeNote: 'Referred to cardiology.',
+      completedAt,
+    })
+
+    const res = await callHandler('GET', { id: CONSULTATION_ID })
+    const body = res._getJSONData()
+
+    expect(res.statusCode).toBe(200)
+    expect(body.consultation.outcome).toBe('REFERRED')
+    expect(body.consultation.outcomeNote).toBe('Referred to cardiology.')
+    expect(body.consultation.completedAt).toBe(completedAt.toISOString())
+  })
+
   test('documents carry structured abnormal-investigation statuses', async () => {
     mockConsultation(SESSION_ID)
     mockPrisma.medicalDocument.findMany.mockResolvedValue([

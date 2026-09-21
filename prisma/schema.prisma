@@ -94,6 +94,13 @@ model Consultation {
   sessionId                     String?                       @unique
   scheduledAt                   DateTime?
   status                        ConsultationStatus            @default(PENDING)
+  // Minimal structured encounter outcome captured when the consultation is
+  // ended. `outcome` is an app-level controlled vocabulary (COMPLETED,
+  // REFERRED, FOLLOW_UP, NOT_COMPLETED); this is an encounter disposition, not
+  // a diagnosis or treatment plan.
+  outcome                       String?
+  outcomeNote                   String?
+  completedAt                   DateTime?
   createdAt                     DateTime                      @default(now())
   updatedAt                     DateTime                      @updatedAt
   ayushAssessment               AyushAssessment?
