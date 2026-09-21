@@ -34,6 +34,26 @@ if (role !== 'DOCTOR') {
   const allowed = await assertDoctorCanAccessConsultation({ consultation, doctorId: doctor.id })
   if (!allowed) return res.status(403).json({ error: 'Access denied' })
 
+  // Emergency alerts for this case only. Scoped to the current consultation id
+  // (and its patient) that passed authorization above, so alerts for other
+  // patients or other consultations are never exposed. Read-only visibility:
+  // this endpoint never acknowledges or resolves alerts.
+  const emergencyAlerts = await prisma.emergencyAlert.findMany({
+    where: { consultationId: consultation.id, patientId: consultation.patientId },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      severity: true,
+      status: true,
+      source: true,
+      createdAt: true,
+      acknowledgedAt: true,
+      resolvedAt: true,
+      consultationId: true,
+      hospitalId: true,
+    },
+  })
+
   // Gather AI/extracted items and latest summary
   const summaries = await prisma.medicalSummary.findMany({ where: { patientId: consultation.patientId }, orderBy: { createdAt: 'desc' }, take: 5 })
   const documents = consultation.sessionId
@@ -63,5 +83,5 @@ if (role !== 'DOCTOR') {
     ? await prisma.doctorVerification.findMany({ where: { doctorId: doctor.id, targetId: { in: verificationTargetIds } }, orderBy: { createdAt: 'asc' } })
     : []
 
-  return res.json({ consultation, summaries, documents: documentsWithAbnormalities, timelines, verifications })
+  return res.json({ consultation, summaries, documents: documentsWithAbnormalities, timelines, verifications, emergencyAlerts })
 }

@@ -33,6 +33,96 @@ function abnormalBadgeClass(status: string): string {
   }
 }
 
+function emergencySeverityClass(severity: string): string {
+  switch (severity) {
+    case 'EMERGENCY': return 'bg-red-100 text-red-800'
+    case 'URGENT': return 'bg-amber-100 text-amber-800'
+    case 'NORMAL': return 'bg-slate-100 text-slate-600'
+    default: return 'bg-slate-100 text-slate-600'
+  }
+}
+
+function emergencyStatusClass(status: string): string {
+  switch (status) {
+    case 'OPEN': return 'bg-red-100 text-red-800 border-red-300'
+    case 'ACKNOWLEDGED': return 'bg-amber-100 text-amber-800 border-amber-300'
+    case 'RESOLVED': return 'bg-green-100 text-green-800 border-green-300'
+    default: return 'bg-slate-100 text-slate-600 border-slate-300'
+  }
+}
+
+// Compact, read-only view of persisted emergency workflow alerts, shown
+// adjacent to the rule-based red-flag banner. The hospital workflow owns
+// acknowledge/resolve; this never mutates alerts and renders nothing when
+// there are no alerts.
+function EmergencyAlertsSubsection({ alerts }: { alerts: any[] }) {
+  const list = alerts || []
+  if (list.length === 0) return null
+
+  return (
+    <div
+      className="p-3 mb-4 bg-orange-50 border-2 border-orange-300 rounded"
+      role="alert"
+      aria-label="Emergency alerts"
+    >
+      <div className="flex flex-wrap items-center gap-2 mb-1">
+        <h3 className="font-bold text-orange-800">
+          {'\u26A0\uFE0F'} Emergency Alert{list.length > 1 ? 's' : ''}
+        </h3>
+        <span className="inline-block text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+          Persisted hospital workflow record
+        </span>
+      </div>
+      <p className="text-orange-800 text-sm mb-2">
+        This is a persisted emergency workflow alert for this case that
+        requires clinical attention. It is distinct from the rule-based red
+        flags detected from the pre-consultation answers above.
+      </p>
+      <div className="space-y-1.5">
+        {list.map((a) => (
+          <div
+            key={a.id}
+            className="flex flex-wrap items-center gap-2 text-sm"
+          >
+            <span
+              className={`text-xs px-2 py-0.5 rounded-full border font-medium ${emergencySeverityClass(
+                a.severity
+              )}`}
+            >
+              {a.severity}
+            </span>
+            <span
+              className={`text-xs px-2 py-0.5 rounded-full border font-medium ${emergencyStatusClass(
+                a.status
+              )}`}
+            >
+              {a.status}
+            </span>
+            <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+              {a.source}
+            </span>
+            {a.createdAt && (
+              <span className="text-xs text-slate-600">
+                Created: {new Date(a.createdAt).toLocaleString()}
+              </span>
+            )}
+            {a.acknowledgedAt && (
+              <span className="text-xs text-amber-700">
+                Acknowledged: {new Date(a.acknowledgedAt).toLocaleString()}
+              </span>
+            )}
+            {a.resolvedAt && (
+              <span className="text-xs text-green-700">
+                Resolved: {new Date(a.resolvedAt).toLocaleString()}
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function VerificationControls({
   targetType,
   targetId,
@@ -158,6 +248,7 @@ export default function CaseSheet() {
   }
 
   const caseData = data?.consultation
+  const emergencyAlerts = data?.emergencyAlerts || []
 
   const verifyingRef = useRef<Set<string>>(new Set())
 
@@ -308,6 +399,8 @@ export default function CaseSheet() {
               </ul>
             </div>
           )}
+
+          <EmergencyAlertsSubsection alerts={emergencyAlerts} />
 
           {session?.report ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
