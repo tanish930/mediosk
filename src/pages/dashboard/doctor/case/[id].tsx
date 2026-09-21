@@ -1,6 +1,7 @@
 import { useRouter } from 'next/router'
 import { getSession } from 'next-auth/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { prisma } from '../../../../lib/prisma'
 import {
   verificationFailureMessage,
   verificationSuccessMessage,
@@ -239,6 +240,90 @@ function ConsultationOutcomeSection({
   )
 }
 
+// Doctor-authored clinical documentation for this consultation. The write box
+// is only offered to the assigned doctor (matching server-side NOTE WRITE
+// rules); consent-only doctors and completed consultations see a read-only
+// list. Notes are documentation, never a diagnosis, prescription, or AI
+// summary.
+function DoctorClinicalNotesSection({
+  consultationId,
+  assignedDoctorId,
+  currentDoctorId,
+  notes,
+  doctorName,
+  onSave,
+}: {
+  consultationId: string
+  assignedDoctorId?: string | null
+  currentDoctorId?: string | null
+  notes: any[]
+  doctorName?: string | null
+  onSave: (text: string) => Promise<void>
+}) {
+  const [text, setText] = useState('')
+  const [saving, setSaving] = useState(false)
+  const isAssigned = Boolean(assignedDoctorId && assignedDoctorId === currentDoctorId)
+
+  return (
+    <section className="mb-4">
+      <h2 className="font-semibold text-lg border-b pb-1 mb-2">
+        Doctor Clinical Notes
+      </h2>
+      <p className="text-sm text-slate-600 mb-2">
+        Doctor-authored documentation for this case. This is clinical
+        documentation only — not a diagnosis, prescription, or AI summary.
+      </p>
+
+      {isAssigned && (
+        <div className="bg-white p-4 border rounded shadow-sm space-y-2 mb-4">
+          <textarea
+            className="w-full border p-1 mt-1"
+            value={text}
+            maxLength={5000}
+            placeholder="Write a clinical note for this case..."
+            onChange={(e) => setText(e.target.value)}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={async () => {
+                setSaving(true)
+                try {
+                  await onSave(text)
+                  setText('')
+                } finally {
+                  setSaving(false)
+                }
+              }}
+              disabled={saving || text.trim() === ''}
+              className="px-3 py-2 bg-sky-600 text-white rounded disabled:opacity-50"
+            >
+              {saving ? 'Saving...' : 'Save Note'}
+            </button>
+            <span className="text-xs text-slate-500">
+              Only the assigned doctor can add notes to this case.
+            </span>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-3">
+        {notes.length === 0 && (
+          <p className="text-sm text-slate-500">No clinical notes yet.</p>
+        )}
+        {notes.map((n) => (
+          <div key={n.id} className="p-3 border rounded bg-slate-50">
+            <div className="text-sm whitespace-pre-wrap">{n.text}</div>
+            <div className="text-xs text-slate-500 mt-2">
+              {doctorName || 'Doctor'} · {new Date(n.createdAt).toLocaleString()}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 function VerificationControls({
   targetType,
   targetId,
@@ -295,7 +380,13 @@ function VerificationControls({
   )
 }
 
-export default function CaseSheet() {
+export default function CaseSheet({
+  doctorName,
+  doctorId,
+}: {
+  doctorName?: string | null
+  doctorId?: string | null
+}) {
   const router = useRouter()
   const { id } = router.query
 
@@ -397,6 +488,24 @@ export default function CaseSheet() {
       alert('Consultation completed')
     } catch {
       alert('Could not complete the consultation')
+    }
+  }
+
+  async function saveClinicalNote(text: string) {
+    try {
+      const res = await fetch(`/api/doctor/case/${id}/notes`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text }),
+      })
+      const body = await res.json().catch(() => null)
+      if (!res.ok) {
+        alert((body as any)?.error || 'Could not save the note')
+        return
+      }
+      await refreshCase()
+    } catch {
+      alert('Could not save the note')
     }
   }
 
@@ -1369,8 +1478,16 @@ export default function CaseSheet() {
             )}
           </div>
         </section>
+        <DoctorClinicalNotesSection
+          consultationId={caseData.id}
+          assignedDoctorId={caseData.doctorId}
+          currentDoctorId={doctorId}
+          notes={data?.clinicalNotes || []}
+          doctorName={doctorName}
+          onSave={saveClinicalNote}
+        />
         <ConsultationOutcomeSection
-          consultation={data}
+          consultation={caseData}
           onSubmit={completeConsultation}
         />
     </main>
@@ -1400,7 +1517,27 @@ export async function getServerSideProps(ctx: any) {
     }
   }
 
+  // Resolve the current doctor so the client can tell the assigned doctor from
+  // a consent-only viewer. Server-side NOTE WRITE rules still enforce write
+  // access; this only decides whether to render the note editor.
+  const userId = (session as any).user?.id
+  const doctor = await prisma.doctor.findUnique({
+    where: { userId },
+    include: { user: { select: { name: true } } },
+  })
+  if (!doctor) {
+    return {
+      redirect: {
+        destination: '/dashboard',
+        permanent: false,
+      },
+    }
+  }
+
   return {
-    props: {},
+    props: {
+      doctorName: doctor.user.name || null,
+      doctorId: doctor.id,
+    },
   }
 }

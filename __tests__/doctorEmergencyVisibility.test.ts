@@ -13,6 +13,7 @@ jest.mock('../src/lib/prisma', () => ({
     medicalDocument: { findMany: jest.fn() },
     medicalTimeline: { findMany: jest.fn() },
     doctorVerification: { findMany: jest.fn() },
+    clinicalNote: { findMany: jest.fn() },
   },
 }))
 
@@ -88,6 +89,7 @@ beforeEach(() => {
   mockPrisma.medicalDocument.findMany.mockResolvedValue([])
   mockPrisma.medicalTimeline.findMany.mockResolvedValue([])
   mockPrisma.doctorVerification.findMany.mockResolvedValue([])
+  mockPrisma.clinicalNote.findMany.mockResolvedValue([])
 })
 
 describe('doctor emergency visibility: GET /api/doctor/case/[id]', () => {

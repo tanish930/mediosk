@@ -83,5 +83,16 @@ if (role !== 'DOCTOR') {
     ? await prisma.doctorVerification.findMany({ where: { doctorId: doctor.id, targetId: { in: verificationTargetIds } }, orderBy: { createdAt: 'asc' } })
     : []
 
-  return res.json({ consultation, summaries, documents: documentsWithAbnormalities, timelines, verifications, emergencyAlerts })
+  // Doctor-authored clinical documentation for this consultation only. Newest
+  // first, consistent with the other case lists (alerts, timelines,
+  // summaries). Only minimal note fields are exposed; author identity is
+  // implied by the assigned doctor and this endpoint never leaks notes from
+  // unrelated consultations.
+  const clinicalNotes = await prisma.clinicalNote.findMany({
+    where: { consultationId: consultation.id },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, doctorId: true, text: true, createdAt: true, updatedAt: true },
+  })
+
+  return res.json({ consultation, summaries, documents: documentsWithAbnormalities, timelines, verifications, emergencyAlerts, clinicalNotes })
 }

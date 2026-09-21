@@ -13,6 +13,7 @@ jest.mock('../src/lib/prisma', () => ({
     medicalDocument: { findMany: jest.fn() },
     medicalTimeline: { findMany: jest.fn() },
     doctorVerification: { findMany: jest.fn() },
+    clinicalNote: { findMany: jest.fn() },
   },
 }))
 
@@ -50,6 +51,7 @@ beforeEach(() => {
   mockPrisma.consent.findFirst.mockResolvedValue(null)
   mockPrisma.doctorVerification.findMany.mockResolvedValue([])
   mockPrisma.emergencyAlert.findMany.mockResolvedValue([])
+  mockPrisma.clinicalNote.findMany.mockResolvedValue([])
 })
 
 function mockConsultation(sessionId: string | null) {
@@ -142,6 +144,59 @@ describe('GET /api/doctor/case/[id]', () => {
     expect(body.consultation.completedAt).toBe(completedAt.toISOString())
   })
 
+  test('case response includes clinical notes scoped to the consultation, newest first, minimal fields', async () => {
+    mockConsultation(SESSION_ID)
+    const notes = [
+      {
+        id: 'note-2',
+        doctorId: DOCTOR_ID,
+        text: 'Second note',
+        createdAt: new Date('2026-09-21T11:00:00.000Z'),
+        updatedAt: new Date('2026-09-21T11:00:00.000Z'),
+      },
+      {
+        id: 'note-1',
+        doctorId: DOCTOR_ID,
+        text: 'First note',
+        createdAt: new Date('2026-09-21T10:00:00.000Z'),
+        updatedAt: new Date('2026-09-21T10:00:00.000Z'),
+      },
+    ]
+    mockPrisma.clinicalNote.findMany.mockResolvedValue(notes)
+
+    const res = await callHandler('GET', { id: CONSULTATION_ID })
+    const body = res._getJSONData()
+
+    expect(res.statusCode).toBe(200)
+    expect(mockPrisma.clinicalNote.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ consultationId: CONSULTATION_ID }),
+        orderBy: { createdAt: 'desc' },
+      })
+    )
+    expect(body.clinicalNotes).toEqual([
+      expect.objectContaining({ id: 'note-2', text: 'Second note' }),
+      expect.objectContaining({ id: 'note-1', text: 'First note' }),
+    ])
+    expect(Object.keys(body.clinicalNotes[0]).sort()).toEqual([
+      'createdAt',
+      'doctorId',
+      'id',
+      'text',
+      'updatedAt',
+    ])
+  })
+
+  test('case response is additive: clinicalNotes defaults to an empty list', async () => {
+    mockConsultation(SESSION_ID)
+
+    const res = await callHandler('GET', { id: CONSULTATION_ID })
+    const body = res._getJSONData()
+
+    expect(res.statusCode).toBe(200)
+    expect(body.clinicalNotes).toEqual([])
+  })
+
   test('documents carry structured abnormal-investigation statuses', async () => {
     mockConsultation(SESSION_ID)
     mockPrisma.medicalDocument.findMany.mockResolvedValue([
@@ -227,5 +282,28 @@ describe('GET /api/doctor/case/[id]', () => {
     const res = await callHandler('GET', { id: CONSULTATION_ID })
 
     expect(res.statusCode).toBe(403)
+  })
+
+  test('consent-authorized non-assigned doctor can GET clinical notes', async () => {
+    mockPrisma.consultation.findUnique.mockResolvedValue({
+      ...mockConsultation(SESSION_ID),
+      doctorId: 'other-doctor',
+    })
+    mockPrisma.consent.findFirst.mockResolvedValue({
+      id: 'consent-1',
+      patientId: PATIENT_ID,
+      granteeDoctorId: DOCTOR_ID,
+      granted: true,
+    })
+    mockPrisma.clinicalNote.findMany.mockResolvedValue([
+      { id: 'note-1', doctorId: 'other-doctor', text: 'First note', createdAt: new Date('2026-09-21T09:00:00.000Z'), updatedAt: new Date('2026-09-21T09:00:00.000Z') },
+    ])
+
+    const res = await callHandler('GET', { id: CONSULTATION_ID })
+    const body = res._getJSONData()
+
+    expect(res.statusCode).toBe(200)
+    expect(body.clinicalNotes).toHaveLength(1)
+    expect(body.clinicalNotes[0]).toMatchObject({ id: 'note-1', text: 'First note' })
   })
 })
