@@ -2,6 +2,7 @@ import { getToken } from 'next-auth/jwt'
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { prisma } from '../../../../../lib/prisma'
 import { z } from 'zod'
+import { assertDoctorCanAccessConsultation } from '../../../../../lib/consultationAccess'
 
 const BodySchema = z.object({ targetType: z.string(), targetId: z.string().uuid(), status: z.enum(['AI_GENERATED','REVIEWED','VERIFIED']), note: z.string().optional() })
 
@@ -26,9 +27,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // verify that consultation exists and doctor assigned or consent
   const consultation = await prisma.consultation.findUnique({ where: { id } })
   if (!consultation) return res.status(404).json({ error: 'Consultation not found' })
-  const assigned = consultation.doctorId === doctor.id
-  const consent = await prisma.consent.findFirst({ where: { patientId: consultation.patientId, granteeDoctorId: doctor.id, granted: true } })
-  if (!assigned && !consent) return res.status(403).json({ error: 'Access denied' })
+  const allowed = await assertDoctorCanAccessConsultation({ consultation, doctorId: doctor.id })
+  if (!allowed) return res.status(403).json({ error: 'Access denied' })
 
   // avoid duplicate verification records when the same button is clicked repeatedly
   const existing = await prisma.doctorVerification.findFirst({

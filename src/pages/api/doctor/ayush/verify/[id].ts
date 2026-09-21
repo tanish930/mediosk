@@ -2,6 +2,7 @@ import { getToken } from 'next-auth/jwt'
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { prisma } from '../../../../../lib/prisma'
 import { z } from 'zod'
+import { assertDoctorCanAccessConsultation } from '../../../../../lib/consultationAccess'
 
 const BodySchema = z.object({ status: z.enum(['REVIEWED','VERIFIED']), note: z.string().optional() })
 
@@ -26,9 +27,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const consultation = ayush.consultationId ? await prisma.consultation.findUnique({ where: { id: ayush.consultationId } }) : null
   const doctor = await prisma.doctor.findUnique({ where: { userId } })
   if (!doctor) return res.status(404).json({ error: 'Doctor not found' })
-  const assigned = consultation ? consultation.doctorId === doctor.id : false
-  const consent = consultation ? await prisma.consent.findFirst({ where: { patientId: consultation.patientId, granteeDoctorId: doctor.id }, orderBy: { createdAt: 'desc' } }) : null
-  if (!assigned && !(consent && consent.granted === true)) return res.status(403).json({ error: 'Access denied' })
+  const allowed = await assertDoctorCanAccessConsultation({ consultation, doctorId: doctor.id })
+  if (!allowed) return res.status(403).json({ error: 'Access denied' })
 
   const { status, note } = parsed.data
   const updated = await prisma.ayushAssessment.update({ where: { id }, data: { status, verifiedBy: doctor.id, verifiedAt: new Date() } })

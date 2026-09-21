@@ -1,6 +1,7 @@
 import { getToken } from 'next-auth/jwt'
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { prisma } from '../../../../lib/prisma'
+import { assertDoctorCanAccessConsultation } from '../../../../lib/consultationAccess'
 
 export default async function handler(
   req: NextApiRequest,
@@ -107,23 +108,17 @@ export default async function handler(
       })
     }
 
-    // Doctor must be assigned to this consultation.
-    if (doctor.id !== consultation.doctorId) {
-      const consent = await prisma.consent.findFirst({
-        where: {
-          patientId: consultation.patientId,
-          granteeDoctorId: doctor.id,
-        },
-        orderBy: {
-          createdAt: 'desc',
-        },
-      })
+    // Doctor must be assigned to this consultation, or hold a granted
+    // patient consent for the consultation's patient.
+    const doctorAllowed = await assertDoctorCanAccessConsultation({
+      consultation,
+      doctorId: doctor.id,
+    })
 
-      if (!consent || consent.granted !== true) {
-        return res.status(403).json({
-          error: 'forbidden',
-        })
-      }
+    if (!doctorAllowed) {
+      return res.status(403).json({
+        error: 'forbidden',
+      })
     }
   } else if (role === 'HOSPITAL') {
     // Hospital users must have an explicit join authorization.

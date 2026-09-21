@@ -6,6 +6,7 @@ import {
   findAyushDecisionSupport,
   regenerateAyushDecisionSupport,
 } from '../../../../lib/ayushDecisionSupport'
+import { assertDoctorCanAccessConsultation } from '../../../../lib/consultationAccess'
 
 const NadiDataSchema = z.object({
   rateBpm: z.number().int().min(0).max(300).nullish(),
@@ -61,9 +62,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!consultation) return res.status(404).json({ error: 'Consultation not found' })
 
   // access: doctor must be assigned or patient consent granted
-  const assigned = consultation.doctorId === doctor.id
-  const consent = await prisma.consent.findFirst({ where: { patientId: consultation.patientId, granteeDoctorId: doctor.id }, orderBy: { createdAt: 'desc' } })
-  if (!assigned && !(consent && consent.granted === true)) return res.status(403).json({ error: 'Access denied' })
+  const allowed = await assertDoctorCanAccessConsultation({ consultation, doctorId: doctor.id })
+  if (!allowed) return res.status(403).json({ error: 'Access denied' })
 
   if (req.method === 'GET') {
     const ayush = await prisma.ayushAssessment.findFirst({ where: { consultationId: consultation.id } })
