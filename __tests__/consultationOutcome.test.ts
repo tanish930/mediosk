@@ -1,8 +1,8 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { createRequest, createResponse } from 'node-mocks-http'
 
-jest.mock('next-auth/react', () => ({
-  getSession: jest.fn(),
+jest.mock('next-auth/jwt', () => ({
+  getToken: jest.fn(),
 }))
 
 jest.mock('../src/lib/prisma', () => ({
@@ -14,11 +14,11 @@ jest.mock('../src/lib/prisma', () => ({
   },
 }))
 
-import { getSession } from 'next-auth/react'
+import { getToken } from 'next-auth/jwt'
 import { prisma } from '../src/lib/prisma'
 import endHandler from '../src/pages/api/consultations/[id]/end'
 
-const mockGetSession = getSession as jest.Mock
+const mockGetToken = getToken as jest.Mock
 const mockPrisma = prisma as any
 
 const CONSULT_ID = '00000000-0000-0000-0000-000000000001'
@@ -28,8 +28,8 @@ const DOCTOR_USER_ID = '00000000-0000-0000-0000-000000000011'
 const OTHER_DOCTOR_USER_ID = '00000000-0000-0000-0000-000000000012'
 const HOSPITAL_USER_ID = '00000000-0000-0000-0000-000000000021'
 
-const doctorToken = { user: { id: DOCTOR_USER_ID, role: 'DOCTOR' } }
-const hospitalToken = { user: { id: HOSPITAL_USER_ID, role: 'HOSPITAL' } }
+const doctorToken = { id: DOCTOR_USER_ID, role: 'DOCTOR' }
+const hospitalToken = { id: HOSPITAL_USER_ID, role: 'HOSPITAL' }
 
 function consultation(overrides: Record<string, unknown> = {}) {
   return {
@@ -44,7 +44,7 @@ function consultation(overrides: Record<string, unknown> = {}) {
 }
 
 async function callHandler(method: string, body: unknown, token: Record<string, unknown> | null, query: Record<string, unknown> = { id: CONSULT_ID }) {
-  mockGetSession.mockResolvedValue(token)
+  mockGetToken.mockResolvedValue(token)
   const req = createRequest({ method: method as any, query, body: body as any }) as unknown as NextApiRequest
   const res = createResponse()
   await endHandler(req as any, res as any)
@@ -158,7 +158,7 @@ describe('POST /api/consultations/[id]/end', () => {
     const result = await callHandler(
       'POST',
       { outcome: 'COMPLETED' },
-      { user: { id: OTHER_DOCTOR_USER_ID, role: 'DOCTOR' } }
+      { id: OTHER_DOCTOR_USER_ID, role: 'DOCTOR' }
     )
 
     expect(result.status).toBe(403)
@@ -231,7 +231,7 @@ describe('POST /api/consultations/[id]/end', () => {
     const result = await callHandler(
       'POST',
       { outcome: 'COMPLETED' },
-      { user: { id: 'patient-user', role: 'PATIENT' } }
+      { id: 'patient-user', role: 'PATIENT' }
     )
 
     expect(result.status).toBe(403)
