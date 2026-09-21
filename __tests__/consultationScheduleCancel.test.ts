@@ -1,8 +1,8 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { createRequest, createResponse } from 'node-mocks-http'
 
-jest.mock('next-auth/react', () => ({
-  getSession: jest.fn(),
+jest.mock('next-auth/jwt', () => ({
+  getToken: jest.fn(),
 }))
 
 jest.mock('../src/lib/prisma', () => ({
@@ -14,12 +14,12 @@ jest.mock('../src/lib/prisma', () => ({
   },
 }))
 
-import { getSession } from 'next-auth/react'
+import { getToken } from 'next-auth/jwt'
 import { prisma } from '../src/lib/prisma'
 import scheduleHandler from '../src/pages/api/consultations/[id]/schedule'
 import cancelHandler from '../src/pages/api/consultations/[id]/cancel'
 
-const mockGetSession = getSession as jest.Mock
+const mockGetToken = getToken as jest.Mock
 const mockPrisma = prisma as any
 
 const CONSULT_ID = '00000000-0000-0000-0000-000000000001'
@@ -46,7 +46,7 @@ function consultation(overrides: Record<string, unknown> = {}) {
 }
 
 async function callHandler(handler: any, method: string, body: unknown, token: Record<string, unknown> | null, query: Record<string, unknown> = { id: CONSULT_ID }) {
-  mockGetSession.mockResolvedValue(token)
+  mockGetToken.mockResolvedValue(token)
   const req = createRequest({ method: method as any, query, body: body as any }) as unknown as NextApiRequest
   const res = createResponse()
   await handler(req as any, res as any)
@@ -76,7 +76,7 @@ describe('PATCH /api/consultations/[id]/schedule', () => {
       scheduleHandler,
       'PATCH',
       { scheduledAt: '2026-09-20T10:30:00.000Z' },
-      { user: { id: DOCTOR_USER_ID, role: 'DOCTOR' } }
+      { id: DOCTOR_USER_ID, role: 'DOCTOR' }
     )
 
     expect(result.status).toBe(200)
@@ -96,7 +96,7 @@ describe('PATCH /api/consultations/[id]/schedule', () => {
       scheduleHandler,
       'PATCH',
       { scheduledAt: '2026-09-20T10:30:00.000Z' },
-      { user: { id: HOSPITAL_USER_ID, role: 'HOSPITAL' } }
+      { id: HOSPITAL_USER_ID, role: 'HOSPITAL' }
     )
 
     expect(result.status).toBe(200)
@@ -110,7 +110,7 @@ describe('PATCH /api/consultations/[id]/schedule', () => {
       scheduleHandler,
       'PATCH',
       { scheduledAt: '2026-09-20T10:30:00.000Z' },
-      { user: { id: OTHER_DOCTOR_USER_ID, role: 'DOCTOR' } }
+      { id: OTHER_DOCTOR_USER_ID, role: 'DOCTOR' }
     )
 
     expect(result.status).toBe(403)
@@ -124,7 +124,7 @@ describe('PATCH /api/consultations/[id]/schedule', () => {
       scheduleHandler,
       'PATCH',
       { scheduledAt: '2026-09-20T10:30:00.000Z' },
-      { user: { id: OTHER_HOSPITAL_USER_ID, role: 'HOSPITAL' } }
+      { id: OTHER_HOSPITAL_USER_ID, role: 'HOSPITAL' }
     )
 
     expect(result.status).toBe(403)
@@ -137,7 +137,7 @@ describe('PATCH /api/consultations/[id]/schedule', () => {
       scheduleHandler,
       'PATCH',
       { scheduledAt: '2026-09-20T10:30:00.000Z' },
-      { user: { id: DOCTOR_USER_ID, role: 'DOCTOR' } }
+      { id: DOCTOR_USER_ID, role: 'DOCTOR' }
     )
 
     expect(result.status).toBe(409)
@@ -148,10 +148,35 @@ describe('PATCH /api/consultations/[id]/schedule', () => {
       scheduleHandler,
       'PATCH',
       { scheduledAt: '2026-09-20T10:30:00.000Z' },
-      { user: { id: PATIENT_USER_ID, role: 'PATIENT' } }
+      { id: PATIENT_USER_ID, role: 'PATIENT' }
     )
 
     expect(result.status).toBe(403)
+  })
+
+  test('unauthenticated request returns 401', async () => {
+    const result = await callHandler(
+      scheduleHandler,
+      'PATCH',
+      { scheduledAt: '2026-09-20T10:30:00.000Z' },
+      null
+    )
+
+    expect(result.status).toBe(401)
+    expect(mockPrisma.consultation.update).not.toHaveBeenCalled()
+  })
+
+  test('invalid schedule input is rejected', async () => {
+    const result = await callHandler(
+      scheduleHandler,
+      'PATCH',
+      { scheduledAt: 12345 },
+      { id: DOCTOR_USER_ID, role: 'DOCTOR' }
+    )
+
+    expect(result.status).toBe(400)
+    expect(result.body.error).toBe('invalid')
+    expect(mockPrisma.consultation.update).not.toHaveBeenCalled()
   })
 })
 
@@ -161,7 +186,7 @@ describe('POST /api/consultations/[id]/cancel', () => {
       cancelHandler,
       'POST',
       {},
-      { user: { id: PATIENT_USER_ID, role: 'PATIENT' } }
+      { id: PATIENT_USER_ID, role: 'PATIENT' }
     )
 
     expect(result.status).toBe(200)
@@ -178,7 +203,7 @@ describe('POST /api/consultations/[id]/cancel', () => {
       cancelHandler,
       'POST',
       {},
-      { user: { id: DOCTOR_USER_ID, role: 'DOCTOR' } }
+      { id: DOCTOR_USER_ID, role: 'DOCTOR' }
     )
 
     expect(result.status).toBe(200)
@@ -192,7 +217,7 @@ describe('POST /api/consultations/[id]/cancel', () => {
       cancelHandler,
       'POST',
       {},
-      { user: { id: HOSPITAL_USER_ID, role: 'HOSPITAL' } }
+      { id: HOSPITAL_USER_ID, role: 'HOSPITAL' }
     )
 
     expect(result.status).toBe(200)
@@ -204,7 +229,7 @@ describe('POST /api/consultations/[id]/cancel', () => {
       cancelHandler,
       'POST',
       {},
-      { user: { id: OTHER_PATIENT_USER_ID, role: 'PATIENT' } }
+      { id: OTHER_PATIENT_USER_ID, role: 'PATIENT' }
     )
 
     expect(result.status).toBe(403)
@@ -218,7 +243,7 @@ describe('POST /api/consultations/[id]/cancel', () => {
       cancelHandler,
       'POST',
       {},
-      { user: { id: OTHER_DOCTOR_USER_ID, role: 'DOCTOR' } }
+      { id: OTHER_DOCTOR_USER_ID, role: 'DOCTOR' }
     )
 
     expect(result.status).toBe(403)
@@ -231,7 +256,7 @@ describe('POST /api/consultations/[id]/cancel', () => {
       cancelHandler,
       'POST',
       {},
-      { user: { id: OTHER_HOSPITAL_USER_ID, role: 'HOSPITAL' } }
+      { id: OTHER_HOSPITAL_USER_ID, role: 'HOSPITAL' }
     )
 
     expect(result.status).toBe(403)
@@ -244,7 +269,7 @@ describe('POST /api/consultations/[id]/cancel', () => {
       cancelHandler,
       'POST',
       {},
-      { user: { id: PATIENT_USER_ID, role: 'PATIENT' } }
+      { id: PATIENT_USER_ID, role: 'PATIENT' }
     )
 
     expect(result.status).toBe(409)
@@ -258,7 +283,7 @@ describe('POST /api/consultations/[id]/cancel', () => {
       cancelHandler,
       'POST',
       {},
-      { user: { id: PATIENT_USER_ID, role: 'PATIENT' } }
+      { id: PATIENT_USER_ID, role: 'PATIENT' }
     )
 
     expect(result.status).toBe(409)
@@ -271,7 +296,7 @@ describe('POST /api/consultations/[id]/cancel', () => {
       cancelHandler,
       'POST',
       {},
-      { user: { id: PATIENT_USER_ID, role: 'PATIENT' } }
+      { id: PATIENT_USER_ID, role: 'PATIENT' }
     )
 
     expect(result.status).toBe(404)

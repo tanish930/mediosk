@@ -1,17 +1,18 @@
-import { getSession } from 'next-auth/react'
+import { getToken } from 'next-auth/jwt'
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { prisma } from '../../../lib/prisma'
 
 export default async function handler(req:NextApiRequest,res:NextApiResponse){
   const { id } = req.query as any
-  const session = await getSession({ req })
-  if (!session) return res.status(401).json({ error: 'unauthenticated' })
+  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET })
+  if (!token) return res.status(401).json({ error: 'unauthenticated' })
+  const uid = token.id as string
+  if (!uid) return res.status(401).json({ error: 'unauthenticated' })
+  const role = token.role as string
 
   const c = await prisma.consultation.findUnique({ where: { id }, include: { doctor: { include: { user: true } }, patient: { include: { user: true } } } })
   if (!c) return res.status(404).json({ error: 'not_found' })
 
-  const uid = (session as any).user.id
-  const role = (session as any).user.role
   // only assigned doctor or patient may view; hospital allowed only if explicit audit exists
   if (role === 'DOCTOR' && (!c.doctor || c.doctor.userId !== uid)) {
     // doctor may still view if they have active consent for this patient
